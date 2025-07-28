@@ -1,0 +1,4 @@
+ebooklib
+google-generativeai
+python-dotenv
+BeautifulSoup4

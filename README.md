@@ -41,11 +41,13 @@ Place your EPUB book file in the same directory as the scripts.
 To summarize the chapters of your EPUB book:
 
 ```bash
-python main.py
+python main.py "Your_Book_Name.epub"
 ```
 
+Replace `"Your_Book_Name.epub"` with the actual filename of your EPUB book.
+
 The script will:
-*   Read the EPUB file specified in `main.py` (currently `Workplace Poker_ Are You Playing the Game, or Just Getting Played_ (2016, HarperBusiness) - libgen.li.epub`). You can modify the `epub_file` variable in `main.py` to point to a different book.
+*   Read the EPUB file provided as an argument.
 *   Create a folder named after the book's title (e.g., `Workplace_Poker`).
 *   Generate Markdown files for each chapter summary (e.g., `chapter_1.md`, `conclusion.md`) inside the book's folder.
 
@@ -68,7 +70,7 @@ The script will:
 
 ## Customization
 
-*   **EPUB File**: Modify the `epub_file` variable in `main.py` to change the target book for summarization.
+*   **EPUB File**: Both `main.py` and `extract_images.py` now accept the EPUB file path as a command-line argument.
 *   **Excluded Sections**: Adjust the `exclude_keywords` list in `main.py` to customize which sections are skipped during summarization.
 *   **Gemini Model**: The `summarize_text_with_gemini` function in `main.py` uses `models/gemini-2.5-flash`. You can change this to another available Gemini model if desired.
 *   **API Call Delay**: The `time.sleep(5)` call in `main.py` can be adjusted to change the delay between Gemini API requests.

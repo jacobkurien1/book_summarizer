@@ -132,5 +132,9 @@ def main(epub_path):
     
 
 if __name__ == "__main__":
-    epub_file = "Workplace Poker_ Are You Playing the Game, or Just Getting Played_ (2016, HarperBusiness) - libgen.li.epub"
+    if len(sys.argv) < 2:
+        print("Usage: python main.py <path_to_epub_file>")
+        sys.exit(1)
+    
+    epub_file = sys.argv[1]
     main(epub_file)

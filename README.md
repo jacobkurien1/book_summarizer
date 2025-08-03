@@ -2,6 +2,8 @@
 
 This project provides Python scripts to process EPUB (electronic publication) files. It can summarize book chapters using the Google Gemini API and extract images, organizing the output into a structured folder named after the book.
 
+It also includes a `utils.py` file with helper functions for robust filename sanitization and chapter identification.
+
 ## Features
 
 *   **Chapter Summarization**: Summarizes each chapter of an EPUB book into a separate Markdown file.
@@ -11,22 +13,27 @@ This project provides Python scripts to process EPUB (electronic publication) fi
 *   **Organized Output**: All generated summaries and extracted images are stored in a dedicated folder named after the book's title (e.g., `Workplace_Poker`).
 *   **Decoupled Functionality**: Summarization and image extraction are handled by separate scripts for modularity.
 
+## Project Structure
+
+*   `main.py`: The main script for summarizing EPUB chapters.
+*   `extract_images.py`: A separate script for extracting images from EPUBs.
+*   `utils.py`: Contains helper functions for filename sanitization and chapter identification.
+*   `test_utils.py`: Unit tests for the `utils.py` helper functions.
+*   `requirements.txt`: Lists the Python dependencies.
+*   `.env`: (Optional) Stores your Gemini API key.
+*   `README.md`: This file.
+
 ## Setup
 
-1.  **Clone the repository (if applicable) or navigate to the project directory:**
-    ```bash
-    cd /path/to/your/book_summarizer
-    ```
-
-2.  **Install Dependencies**:
+1.  **Install Dependencies**:
     The project requires Python 3 and the libraries listed in `requirements.txt`.
     ```bash
     pip install -r requirements.txt
     ```
 
-3.  **Set up Gemini API Key**:
+2.  **Set up Gemini API Key**:
     You need a Google Gemini API key. You can obtain one from the [Google AI Studio](https://aistudio.google.com/app/apikey).
-    Create a file named `.env` in the root of your project directory (the same directory as `main.py` and `extract_images.py`) and add your API key to it in the following format:
+    Create a file named `.env` in the root of your project directory (the same directory as `main.py`, `extract_images.py`, and `utils.py`) and add your API key to it in the following format:
     ```
     GEMINI_API_KEY=YOUR_ACTUAL_GEMINI_API_KEY_HERE
     ```

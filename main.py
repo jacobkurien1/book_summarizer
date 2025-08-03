@@ -4,17 +4,13 @@ import google.generativeai as genai
 import os
 import time
 import re
+import sys
 from dotenv import load_dotenv
+from utils import sanitize_filename, get_chapter_identifier, get_book_output_folder
 
 load_dotenv()
 
-def sanitize_filename(name):
-    # Replace spaces with underscores
-    s = name.replace(' ', '_')
-    # Remove characters that are not alphanumeric, underscores, or hyphens
-    s = re.sub(r'[^a-zA-Z0-9_-]', '', s)
-    s = s.strip()
-    return s if s else "summaries_output"
+
 
 def get_chapter_content(item):
     """Extracts text content from an EPUB item (chapter)."""
@@ -29,7 +25,9 @@ def summarize_text_with_gemini(text, api_key):
     genai.configure(api_key=api_key)
     model = genai.GenerativeModel('models/gemini-2.5-flash')
 
-    prompt = f"""Please summarize the following text, highlighting the most important points.
+    prompt = f"""Please summarize the following text, highlighting the most important points. 
+    Organize the knowledge. Find counter intutive points and also some examples to support them.
+    Give extra focus to the bold text in the chapter and the headings and subheadings.
     Text:
     {text}
     """
@@ -47,16 +45,7 @@ def main(epub_path):
 
     book = epub.read_epub(epub_path)
 
-    # Get book title and sanitize it for folder name
-    book_title = book.get_metadata('DC', 'title')[0][0] if book.get_metadata('DC', 'title') else "Unknown Book"
-    # Extract primary part of the title for folder name
-    if ":" in book_title:
-        book_folder_name_raw = book_title.split(":")[0]
-    else:
-        book_folder_name_raw = book_title
-    book_folder_name = sanitize_filename(book_folder_name_raw)
-    if not book_folder_name: # Fallback if sanitization results in empty string
-        book_folder_name = "summaries_output" # A generic fallback for summaries
+    book_folder_name = get_book_output_folder(book, default_name="summaries_output")
     output_base_dir = os.path.join(os.path.dirname(epub_path), book_folder_name)
     os.makedirs(output_base_dir, exist_ok=True)
     print(f"Summaries will be saved in: {output_base_dir}")
@@ -69,7 +58,7 @@ def main(epub_path):
         "cover", "titlepage", "dedication", "nav", "introduction",
         "acknowledgments", "about_the_author", "ba1", "copyright",
         "credits", "publisher", "preface", "foreword", "epilogue",
-        "appendix", "index", "glossary", "bibliography"
+        "appendix", "index", "glossary", "bibliography", "frontmatter"
     ]   
 
     print(f"Processing EPUB: {epub_path}")
@@ -92,34 +81,10 @@ def main(epub_path):
                     return
 
                 summary = summarize_text_with_gemini(chapter_content, gemini_api_key)
-                time.sleep(5) # Add a delay to respect API rate limits
+                #time.sleep(5) # Add a delay to respect API rate limits
                 if summary:
-                    # Simplify item name for filename
-                    simplified_name = item.get_name().lower()
-                    if "chapter" in simplified_name:
-                        match = re.search(r'chapter_(\d+)', simplified_name)
-                        if match:
-                            filename = f"chapter_{match.group(1)}.md"
-                        else:
-                            filename = f"chapter_{sanitize_filename(item.get_name())}.md"
-                    elif "conclusion" in simplified_name:
-                        filename = "conclusion.md"
-                    elif "preface" in simplified_name:
-                        filename = "preface.md"
-                    elif "foreword" in simplified_name:
-                        filename = "foreword.md"
-                    elif "epilogue" in simplified_name:
-                        filename = "epilogue.md"
-                    elif "introduction" in simplified_name:
-                        filename = "introduction.md"
-                    elif "appendix" in simplified_name:
-                        filename = "appendix.md"
-                    elif "glossary" in simplified_name:
-                        filename = "glossary.md"
-                    elif "index" in simplified_name:
-                        filename = "index.md"
-                    else:
-                        filename = f"{sanitize_filename(item.get_name())}.md"
+                    chapter_identifier = get_chapter_identifier(item.get_name())
+                    filename = f"{chapter_identifier}.md"
                     
                     chapter_output_path = os.path.join(output_base_dir, filename)
                     os.makedirs(os.path.dirname(chapter_output_path), exist_ok=True)
@@ -137,4 +102,6 @@ if __name__ == "__main__":
         sys.exit(1)
     
     epub_file = sys.argv[1]
+    epub_file = epub_file.replace('\\', '') # Remove literal backslashes
+    epub_file = os.path.normpath(epub_file)
     main(epub_file)

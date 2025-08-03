@@ -4,31 +4,23 @@ import os
 import re
 import sys
 from bs4 import BeautifulSoup
+from utils import sanitize_filename, get_book_output_folder, get_chapter_identifier
 
-def sanitize_filename(name):
-    # Replace spaces with underscores
-    s = name.replace(' ', '_')
-    # Remove characters that are not alphanumeric, underscores, or hyphens
-    s = re.sub(r'[^a-zA-Z0-9_-]', '', s)
-    s = s.strip()
-    return s if s else "extracted_images"
+
 
 def extract_images(epub_path):
+    epub_path = sys.argv[1]
+    epub_path = epub_path.replace('\\', '') # Remove literal backslashes
+    print(f"Raw epub_path from sys.argv[1]: {epub_path}")
     epub_path = os.path.abspath(epub_path)
+    epub_path = os.path.normpath(epub_path)
     if not os.path.exists(epub_path):
         print(f"Error: EPUB file not found at {epub_path}")
         return
 
     book = epub.read_epub(epub_path)
 
-    # Get book title and sanitize it for folder name
-    book_title = book.get_metadata('DC', 'title')[0][0] if book.get_metadata('DC', 'title') else "Unknown Book"
-    # Extract primary part of the title for folder name
-    if ":" in book_title:
-        book_folder_name_raw = book_title.split(":")[0]
-    else:
-        book_folder_name_raw = book_title
-    book_folder_name = sanitize_filename(book_folder_name_raw)
+    book_folder_name = get_book_output_folder(book, default_name="extracted_images")
     output_base_dir = os.path.join(os.path.dirname(epub_path), book_folder_name)
     os.makedirs(output_base_dir, exist_ok=True)
     print(f"Images will be saved in: {output_base_dir}")
@@ -54,57 +46,16 @@ def extract_images(epub_path):
     for item in book.get_items():
         if item.get_type() == ebooklib.ITEM_DOCUMENT:
             chapter_name = item.get_name()
+            # Aggressively clean the name for better identifier matching
             simplified_name = chapter_name.lower()
+            simplified_name = simplified_name.replace('text/', '')
+            simplified_name = simplified_name.replace('xhtml/', '')
+            simplified_name = simplified_name.replace('.xhtml', '')
+            simplified_name = re.sub(r'_epub3_.*_r\d+', '', simplified_name) # Remove _epub3_..._rX patterns
+            simplified_name = re.sub(r'_r\d+', '', simplified_name) # Remove _rX patterns
+            simplified_name = re.sub(r'^bloo_\d+_', '', simplified_name) # Remove bloo_..._ prefixes
             
-            # Determine chapter identifier for filename
-            chapter_identifier = ""
-            if "cover" in simplified_name:
-                chapter_identifier = "cover"
-            elif "titlepage" in simplified_name:
-                chapter_identifier = "titlepage"
-            elif "dedication" in simplified_name:
-                chapter_identifier = "dedication"
-            elif "nav" in simplified_name:
-                chapter_identifier = "navigation"
-            elif "introduction" in simplified_name:
-                chapter_identifier = "introduction"
-            elif "acknowledgments" in simplified_name:
-                chapter_identifier = "acknowledgments"
-            elif "about_the_author" in simplified_name:
-                chapter_identifier = "about_the_author"
-            elif "ba1" in simplified_name:
-                chapter_identifier = "back_matter_1"
-            elif "copyright" in simplified_name:
-                chapter_identifier = "copyright"
-            elif "credits" in simplified_name:
-                chapter_identifier = "credits"
-            elif "publisher" in simplified_name:
-                chapter_identifier = "publisher_info"
-            elif "preface" in simplified_name:
-                chapter_identifier = "preface"
-            elif "foreword" in simplified_name:
-                chapter_identifier = "foreword"
-            elif "epilogue" in simplified_name:
-                chapter_identifier = "epilogue"
-            elif "appendix" in simplified_name:
-                chapter_identifier = "appendix"
-            elif "index" in simplified_name:
-                chapter_identifier = "index"
-            elif "glossary" in simplified_name:
-                chapter_identifier = "glossary"
-            elif "bibliography" in simplified_name:
-                chapter_identifier = "bibliography"
-            elif "chapter" in simplified_name:
-                match = re.search(r'chapter_(\d+)', simplified_name)
-                if match:
-                    chapter_identifier = f"chapter_{match.group(1)}"
-                else:
-                    chapter_identifier = sanitize_filename(chapter_name)
-            else:
-                chapter_identifier = sanitize_filename(chapter_name)
-
-            if not chapter_identifier: # Fallback for unidentifiable chapters
-                chapter_identifier = "unknown_chapter"
+            chapter_identifier = get_chapter_identifier(chapter_name)
 
             chapter_image_counts[chapter_identifier] = chapter_image_counts.get(chapter_identifier, 0)
             

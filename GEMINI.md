@@ -29,4 +29,4 @@ You are an AI assistant helping to process and summarize e-books. Your primary g
 *   **Clarity and Conciseness**: Summaries should be easy to understand and to the point.
 *   **Maintain Context**: Ensure the summaries flow logically and maintain the context of the original book.
 *   **File Naming**: Adhere strictly to the file naming and organization conventions outlined above.
-*   **Handle Images**: When summarizing a chapter that includes images, note the presence of the images in the summary (e.g., "[Image: A chart showing X]"). Do not try to analyze the image content directly unless requested.
+*   **Handle Images**: When summarizing a chapter that includes images, add the images in the summary. 

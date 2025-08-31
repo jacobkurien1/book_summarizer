@@ -93,11 +93,12 @@ def is_non_chapter_content(content: str) -> bool:
     """Checks if the content is a non-chapter section."""
     non_chapter_keywords = [
         "dedication", "copyright", "acknowledgments", "title page", 
-        "table of contents", "epigraph", "author's note"
+        "table of contents", "epigraph", "author's note", "publisher", "isbn",
+        "frontmatter", "halftitle"
     ]
     
-    # Check for keywords in the first few lines of the content
-    content_lower = content.lower()
+    # Check for keywords in the first 1024 characters of the content
+    content_lower = content[:1024].lower()
     for keyword in non_chapter_keywords:
         if keyword in content_lower:
             return True

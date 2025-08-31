@@ -76,29 +76,33 @@ def main(epub_path, full_summary_only=False):
 
         for item in chapters_to_summarize:
             chapter_content = get_chapter_content(item)
-            if chapter_content and len(chapter_content.strip()) > 0:
-                print(f"Summarizing chapter: {item.get_name()}")
-                gemini_api_key = os.getenv("GEMINI_API_KEY")
-                if not gemini_api_key:
-                    print("Error: GEMINI_API_KEY environment variable not set.")
-                    return
+            if not chapter_content or len(chapter_content.strip()) < 100:
+                print(f"Skipping almost empty chapter: {item.get_name()}")
+                continue
 
-                image_context = extract_chapter_images_and_context(item, image_map, output_base_dir, chapter_image_counts)
-                
-                summary = summarize_text_with_gemini(create_chapter_summary_prompt(chapter_content), gemini_api_key)
-                
-                if summary:
-                    # Append image links to the summary
-                    if image_context:
-                        summary += "\n\n### Images\n\n"
-                        for img_info in image_context:
-                            # Ensure image_path is relative to the summary file
-                            relative_image_path = os.path.relpath(img_info["image_path"], os.path.dirname(os.path.join(output_base_dir, get_chapter_identifier(item.get_name()) + ".md")))
-                            summary += f"![{img_info['context_text']}]({relative_image_path})\n"
+            print(f"Summarizing chapter: {item.get_name()}") 
+            print(f"***** {chapter_content}")
+            gemini_api_key = os.getenv("GEMINI_API_KEY")
+            if not gemini_api_key:
+                print("Error: GEMINI_API_KEY environment variable not set.")
+                return
 
-                    save_summary_to_file(summary, item.get_name(), output_base_dir)
-                else:
-                    print(f"Summarization failed for {item.get_name()}")
+            image_context = extract_chapter_images_and_context(item, image_map, output_base_dir, chapter_image_counts)
+            
+            summary = summarize_text_with_gemini(create_chapter_summary_prompt(chapter_content), gemini_api_key)
+            
+            if summary:
+                # Append image links to the summary
+                if image_context:
+                    summary += "\n\n### Images\n\n"
+                    for img_info in image_context:
+                        # Ensure image_path is relative to the summary file
+                        relative_image_path = os.path.relpath(img_info["image_path"], os.path.dirname(os.path.join(output_base_dir, get_chapter_identifier(item.get_name()) + ".md")))
+                        summary += f"![{img_info['context_text']}]({relative_image_path})\n"
+
+                save_summary_to_file(summary, item.get_name(), output_base_dir)
+            else:
+                print(f"Summarization failed for {item.get_name()}")
 
     create_final_summary(book_folder_name, output_base_dir)
 

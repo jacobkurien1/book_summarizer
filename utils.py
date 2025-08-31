@@ -161,7 +161,7 @@ def summarize_text_with_gemini(prompt, api_key):
 
 def create_chapter_summary_prompt (text: str) -> str:
     return f"""## Role & Goal
-    Act as a Knowledge Architect. Your mission is to synthesize my chapter summaries for a book on [Optional: Briefly describe the book's topic, e.g., "a book about productivity and habits"] into a highly-organized and actionable study guide. The final output must be a structured knowledge outline, not a narrative report. Use a direct, instructional tone and format the information for maximum clarity and retention.
+    You are a Knowledge Architect. Your mission is to synthesize my chapter summaries for a book on [Optional: Briefly describe the book's topic, e.g., "a book about productivity and habits"] into a highly-organized and actionable study guide. The final output must be a structured knowledge outline, not a narrative report. Use a direct, instructional tone and format the information for maximum clarity and retention.
 
     ## Formatting Instructions
     * Use a hierarchical structure with markdown headings (##, ###).
@@ -170,7 +170,9 @@ def create_chapter_summary_prompt (text: str) -> str:
     * Use **bolding** to emphasize key terms and concepts.
     * Address the reader directly as "you" where appropriate.
 
-    ## Outline Structure to Follow
+    ## Outline Structure to Follow. 
+    * Only add the output text in this format. Dont add conversational text like "Here is your structured knowledge outline, synthesizing the provided chapter summary into a highly-organized study guide."
+    * Keep the summary to a single page.
 
     ### 1. The Core Thesis / Big Idea
     - **Central Argument:** State the single most important argument or "big idea" of the book.
@@ -232,8 +234,8 @@ def create_full_summary_prompt(text: str) -> str:
     2.  ...
     3.  ...
 
-    ### 6. Most Illuminating Example
-    Select the single case study or example from the summaries that best encapsulates the book's entire thesis in action. Briefly describe it and explain why it's so powerful.
+    ### 6. Most Illuminating Examples
+    Select the case study or examples from the summaries that best encapsulates the book's entire thesis in action. Briefly describe it and explain why it's so powerful.
 
     ## Input Summaries
     Here are the chapter summaries you are to synthesize:

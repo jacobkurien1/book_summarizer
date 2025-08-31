@@ -81,7 +81,6 @@ def main(epub_path, full_summary_only=False):
                 continue
 
             print(f"Summarizing chapter: {item.get_name()}") 
-            print(f"***** {chapter_content}")
             gemini_api_key = os.getenv("GEMINI_API_KEY")
             if not gemini_api_key:
                 print("Error: GEMINI_API_KEY environment variable not set.")

@@ -94,7 +94,7 @@ def is_non_chapter_content(content: str) -> bool:
     non_chapter_keywords = [
         "dedication", "copyright", "acknowledgments", "title page", 
         "table of contents", "epigraph", "author's note", "publisher", "isbn",
-        "frontmatter", "halftitle"
+        "frontmatter", "halftitle", "bibliography", "references"
     ]
     
     # Check for keywords in the first 1024 characters of the content
@@ -162,49 +162,25 @@ def summarize_text_with_gemini(prompt, api_key):
 
 def create_chapter_summary_prompt (text: str) -> str:
     return f"""## Role & Goal
-    You are a Knowledge Architect. Your mission is to synthesize my chapter summaries for a book on [Optional: Briefly describe the book's topic, e.g., "a book about productivity and habits"] into a highly-organized and actionable study guide. The final output must be a structured knowledge outline, not a narrative report. Use a direct, instructional tone and format the information for maximum clarity and retention.
+    You are a Knowledge Distiller. Your mission is to distill the provided chapter summaries for a book into a concise, high-level overview. Your output should be a compact knowledge outline, not a detailed study guide.
+    ---
 
     ## Formatting Instructions
-    * Use a hierarchical structure with markdown headings (##, ###).
-    * Use nested bullet points and numbered lists extensively.
-    * Write in concise, point-form phrases rather than full paragraphs.
-    * Use **bolding** to emphasize key terms and concepts.
-    * Address the reader directly as "you" where appropriate.
+    * Use a hierarchical structure with markdown headings (##, ###, etc.) to organize information.
+    * Use nested bullet points extensively to present key details.
+    * Use bolding to emphasize key terms and concepts.
+    * Do not add any information outside of the provided text.
 
-    ## Outline Structure to Follow. 
-    * Only add the output text in this format. Dont add conversational text like "Here is your structured knowledge outline, synthesizing the provided chapter summary into a highly-organized study guide."
-    * Keep the summary to a single page.
+    ---
 
-    ### 1. The Core Thesis / Big Idea
-    - **Central Argument:** State the single most important argument or "big idea" of the book.
-    - **Problem Solved:** What common problem, question, or misunderstanding does this book address?
-    - **Core Model/Framework:** If there is a central model or equation, state it here.
+    ## Output Structure
+    * Start with the book's central argument or "big idea" in a few sentences.
+    * Organize the remaining content into logical sections. Use concise headings for each section.
+    * Present only the most critical concepts and core advice. Keep bullet points to a minimum, focusing on the main idea of each chapter or section.
 
-    ### 2. Key Pillars / Core Concepts
-    Based on the summaries, identify the 3-5 foundational pillars or main concepts that support the core thesis. For each pillar:
-    - **### Pillar 1: [AI, give this a descriptive name]**
-    - **Core Idea:** Briefly explain the main point of this pillar.
-    - **Key Details:** Use nested bullets to list its most important supporting points, rules, or components.
-    - **### Pillar 2: [AI, give this a descriptive name]**
-    - **Core Idea:** Briefly explain the main point of this pillar.
-    - **Key Details:** Use nested bullets to list its most important supporting points, rules, or components.
-    - *(Continue for all major pillars identified)*
-
-    ### 3. Actionable Framework & Strategies
-    Distill the practical, actionable advice from the book.
-    - **Key Actions:** List the main steps, techniques, or practices the author recommends for you to implement.
-    - **"How-To" Steps:** Break down any complex processes into a simple, step-by-step list.
-
-    ### 4. Underlying Mindsets & Barriers
-    - **Essential Mindsets:** Identify any key mindsets, mental models, or philosophies the author encourages you to adopt.
-    - **Barriers to Overcome:** List any common barriers, fears, or mistakes the author warns against.
-
-    ### 5. Key Examples & Case Studies
-    - Select 1-2 of the most powerful examples, stories, or case studies mentioned.
-    - For each one, briefly describe it and explain which core concept it illustrates.
+    ---
 
     ## Input Summaries
-    Here are the chapter summaries to synthesize:
     {text}
     """
 

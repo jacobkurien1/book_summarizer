@@ -129,10 +129,12 @@ class TestChapterFiltering(unittest.TestCase):
         mock_chapter_item = MagicMock()
         mock_chapter_item.get_type.return_value = ebooklib.ITEM_DOCUMENT
         mock_chapter_item.get_name.return_value = "chapter1.xhtml"
+        mock_chapter_item.get_content.return_value = b"<html><body><h1>Chapter 1 text content</h1></body></html>"
 
         mock_non_chapter_item = MagicMock()
         mock_non_chapter_item.get_type.return_value = ebooklib.ITEM_DOCUMENT
         mock_non_chapter_item.get_name.return_value = "cover.xhtml"
+        mock_non_chapter_item.get_content.return_value = b"<html><body><p>copyright text</p></body></html>"
 
         items = [mock_chapter_item, mock_non_chapter_item]
         exclude_keywords = ["cover"]

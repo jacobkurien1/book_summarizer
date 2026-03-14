@@ -6,6 +6,7 @@ import google.generativeai as genai
 import requests
 import json
 import openai
+from bs4 import BeautifulSoup
 from openai import OpenAI
 
 def sanitize_filename(name):
@@ -111,8 +112,11 @@ def is_non_chapter_content(content: str) -> bool:
         "footnote", "footnotes"
     ]
     
-    # Check for keywords in the first 1024 characters of the content
-    content_lower = content[:1024].lower()
+    soup = BeautifulSoup(content, 'html.parser')
+    text_content = soup.get_text(separator=' ', strip=True)
+    
+    # Check for keywords in the first 1024 characters of the visible text
+    content_lower = text_content[:1024].lower()
     for keyword in non_chapter_keywords:
         if keyword in content_lower:
             return True

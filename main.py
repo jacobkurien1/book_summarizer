@@ -66,11 +66,11 @@ def main(epub_path, full_summary_only=False, use_local_llm=False, use_openai=Fal
 
     if not full_summary_only:
         exclude_keywords = [
-            "cover", "titlepage", "dedication", "nav", "introduction",
+            "cover", "titlepage", "title_page", "dedication", "nav", "introduction",
             "acknowledgments", "about_the_author", "ba1", "copyright",
             "credits", "publisher", "preface", "foreword", "epilogue",
             "appendix", "index", "glossary", "bibliography", "frontmatter",
-            "footnote", "footnotes"
+            "footnote", "footnotes", "contents", "toc"
         ]   
 
         image_map = create_image_map(book)

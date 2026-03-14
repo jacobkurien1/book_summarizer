@@ -3,6 +3,8 @@ from unittest.mock import patch, MagicMock, call
 import os
 import utils
 from ebooklib import epub
+import requests
+import json
 
 class TestSanitizeFilename(unittest.TestCase):
 
@@ -112,7 +114,7 @@ class TestSummarizationWithBackoff(unittest.TestCase):
         # Assert
         self.assertEqual(summary, "This is a summary.")
         self.assertEqual(mock_sleep.call_count, 2)
-        mock_sleep.assert_has_calls([call(1), call(2)])
+        mock_sleep.assert_has_calls([call(10), call(20)])
 
 if __name__ == '__main__':
     unittest.main()
@@ -167,3 +169,77 @@ class TestSummarization(unittest.TestCase):
         # Assert
         self.assertEqual(summary, "This is a summary with images.")
         mock_model_instance.generate_content.assert_called_once_with(prompt)
+
+class TestSummarizer(unittest.TestCase):
+
+    @patch('utils.requests.post')
+    def test_summarize_text_with_local_llm(self, mock_post):
+        # Arrange
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "response": "The capital of France is Paris."
+        }
+        mock_response.raise_for_status = MagicMock()
+        mock_post.return_value = mock_response
+        
+        system_prompt = "Test system prompt"
+        prompt = "What is the capital of France?"
+        
+        # Act
+        summary = utils.summarize_text_with_local_llm(system_prompt, prompt)
+        
+        # Assert
+        self.assertEqual(summary, "The capital of France is Paris.")
+        mock_post.assert_called_once()
+
+    @patch('utils.get_local_llm_system_prompt')
+    @patch('utils.summarize_text_with_local_llm')
+    @patch('utils.summarize_text_with_gemini')
+    def test_summarize_text_calls_local_llm(self, mock_gemini, mock_local, mock_get_system):
+        # Arrange
+        prompt = "Test prompt"
+        mock_get_system.return_value = "System prompt"
+        mock_local.return_value = "Local summary"
+        
+        # Act
+        summary = utils.summarize_text(prompt, use_local_llm=True, gemini_api_key="fake_key")
+        
+        # Assert
+        mock_local.assert_called_once_with("System prompt", prompt)
+        mock_gemini.assert_not_called()
+        self.assertEqual(summary, "Local summary")
+
+    @patch('utils.summarize_text_with_local_llm')
+    @patch('utils.summarize_text_with_gemini')
+    @patch('utils.create_gemini_chapter_summary_prompt')
+    def test_summarize_text_calls_gemini(self, mock_create_prompt, mock_gemini, mock_local):
+        # Arrange
+        prompt = "Test prompt"
+        full_prompt = "Full Gemini prompt"
+        api_key = "fake_key"
+        mock_create_prompt.return_value = full_prompt
+        mock_gemini.return_value = "Gemini summary"
+        
+        # Act
+        summary = utils.summarize_text(prompt, use_local_llm=False, gemini_api_key=api_key)
+        
+        # Assert
+        mock_gemini.assert_called_once_with(full_prompt, api_key)
+        mock_local.assert_not_called()
+        self.assertEqual(summary, "Gemini summary")
+
+    @patch('utils.summarize_text_with_openai')
+    @patch('utils.summarize_text_with_gemini')
+    def test_summarize_text_calls_openai(self, mock_gemini, mock_openai):
+        # Arrange
+        prompt = "Test prompt"
+        api_key = "openai_key"
+        mock_openai.return_value = "OpenAI summary"
+        
+        # Act
+        summary = utils.summarize_text(prompt, openai_api_key=api_key)
+        
+        # Assert
+        mock_openai.assert_called_once_with(prompt, api_key)
+        mock_gemini.assert_not_called()
+        self.assertEqual(summary, "OpenAI summary")

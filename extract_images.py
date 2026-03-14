@@ -5,6 +5,7 @@ import os
 import re
 import sys
 from bs4 import BeautifulSoup
+from urllib.parse import unquote
 from utils import sanitize_filename, get_book_output_folder, get_chapter_identifier
 
 def create_image_map(book):
@@ -33,7 +34,10 @@ def extract_chapter_images_and_context(chapter_item, image_map, output_dir, chap
     for img_tag in images_in_chapter:
         src = img_tag.get('src')
         if src:
-            cleaned_src = src.lstrip('../')
+            decoded_src = unquote(src)
+            chapter_path = os.path.dirname(chapter_item.get_name())
+            cleaned_src = os.path.normpath(os.path.join(chapter_path, decoded_src))
+            cleaned_src = cleaned_src.lstrip('/')
             if cleaned_src in image_map:
                 chapter_image_counts[chapter_identifier] = chapter_image_counts.get(chapter_identifier, 0) + 1
                 image_count_for_chapter = chapter_image_counts[chapter_identifier]

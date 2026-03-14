@@ -23,7 +23,7 @@ class TestExtractImages(unittest.TestCase):
 
         mock_chapter_item = MagicMock()
         mock_chapter_item.get_type.return_value = ebooklib.ITEM_DOCUMENT
-        mock_chapter_item.get_name.return_value = "chapter1.xhtml"
+        mock_chapter_item.get_name.return_value = "xhtml/chapter1.xhtml"
         mock_chapter_item.get_content.return_value = b'<html><body><img src="../images/test_image.jpg"/></body></html>'
 
         mock_book.get_items.return_value = [mock_image_item, mock_chapter_item]
@@ -66,7 +66,7 @@ class TestChapterImageExtraction(unittest.TestCase):
     def test_extract_chapter_images_and_context(self):
         # Arrange
         mock_chapter_item = MagicMock()
-        mock_chapter_item.get_name.return_value = "chapter1.xhtml"
+        mock_chapter_item.get_name.return_value = "xhtml/chapter1.xhtml"
         mock_chapter_item.get_content.return_value = b'<html><body><img src="../images/test_image.jpg" alt="A test image"/></body></html>'
 
         image_map = {"images/test_image.jpg": b"fake_image_data"}
@@ -82,6 +82,24 @@ class TestChapterImageExtraction(unittest.TestCase):
         self.assertEqual(image_context[0]["image_path"], os.path.join(output_dir, "chapter_1_image_1.jpg"))
         self.assertEqual(image_context[0]["context_text"], "A test image")
         mock_open.assert_called_once_with(os.path.join(output_dir, "chapter_1_image_1.jpg"), "wb")
+
+    def test_extract_images_with_url_encoded_path(self):
+        # Arrange
+        mock_chapter_item = MagicMock()
+        mock_chapter_item.get_name.return_value = "xhtml/chapter1.xhtml"
+        mock_chapter_item.get_content.return_value = b'<html><body><img src="../images/image%20with%20space.jpg" alt="Image with space"/></body></html>'
+
+        image_map = {"images/image with space.jpg": b"fake_image_data"}
+        output_dir = "/fake/output/dir"
+        chapter_image_counts = {}
+
+        # Act
+        with patch('builtins.open', new_callable=unittest.mock.mock_open) as mock_open:
+            image_context = extract_chapter_images_and_context(mock_chapter_item, image_map, output_dir, chapter_image_counts)
+
+        # Assert
+        self.assertEqual(len(image_context), 1, "Should find 1 image")
+        self.assertEqual(image_context[0]["context_text"], "Image with space")
 
 if __name__ == '__main__':
     unittest.main()

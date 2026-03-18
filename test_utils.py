@@ -114,7 +114,7 @@ class TestSummarizationWithBackoff(unittest.TestCase):
         # Assert
         self.assertEqual(summary, "This is a summary.")
         self.assertEqual(mock_sleep.call_count, 2)
-        mock_sleep.assert_has_calls([call(10), call(20)])
+        mock_sleep.assert_has_calls([call(60), call(60)])
 
 if __name__ == '__main__':
     unittest.main()
@@ -243,3 +243,58 @@ class TestSummarizer(unittest.TestCase):
         mock_openai.assert_called_once_with(prompt, api_key)
         mock_gemini.assert_not_called()
         self.assertEqual(summary, "OpenAI summary")
+
+class TestMergeAndSplit(unittest.TestCase):
+
+    def test_get_logical_chapter_number(self):
+        self.assertEqual(utils.get_logical_chapter_number("one"), 1)
+        self.assertEqual(utils.get_logical_chapter_number("Chapter Five"), 5)
+        self.assertEqual(utils.get_logical_chapter_number("PART 12"), 12)
+        self.assertEqual(utils.get_logical_chapter_number("unknown text"), None)
+
+    def test_merge_and_split_chapters(self):
+        # Arrange
+        class MockItem:
+            def __init__(self, name, content):
+                self.name = name
+                self.content = content
+            def get_type(self):
+                import ebooklib
+                return ebooklib.ITEM_DOCUMENT
+            def get_name(self):
+                return self.name
+            def get_content(self):
+                return self.content.encode('utf-8')
+
+        mock_items = [
+            MockItem("page1.html", "<html><body>Chapter One<br/>This is content 1</body></html>"),
+            MockItem("page2.html", "<html><body>Chapter Two<br/>This is content 2</body></html>")
+        ]
+        
+        class MockBook:
+            def get_items(self):
+                return mock_items
+        
+        mock_book = MockBook()
+        exclude_keywords = []
+
+        # Act
+        chapters = utils.merge_and_split_chapters(mock_book, exclude_keywords)
+
+        # Assert
+        # Index 0 is Introduction (empty if no text before Chapter One, but our code might pick up something if not careful)
+        # In our case, full_text starts with "Chapter One", so splits[0] is empty or whitespace.
+        # Let's check the logic: pattern.split(full_text)
+        # If full_text starts with a match, splits[0] is empty.
+        
+        # The result should have: 
+        # 1. Introduction (if any text exists before first chapter)
+        # 2. Chapter One
+        # 3. Chapter Two
+        
+        active_chapters = [c for c in chapters if c['name'] != 'Introduction' or c['content'].strip()]
+        self.assertEqual(len(active_chapters), 2)
+        self.assertEqual(active_chapters[0]['name'], "Chapter One")
+        self.assertEqual(active_chapters[0]['logical_num'], 1)
+        self.assertEqual(active_chapters[1]['name'], "Chapter Two")
+        self.assertEqual(active_chapters[1]['logical_num'], 2)

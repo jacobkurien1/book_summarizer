@@ -25,8 +25,12 @@ This project provides Python scripts to process EPUB (electronic publication) fi
 
 ### Technical Details
 
-*   **Gemini API Integration**: Utilizes the Google Gemini API (specifically `gemini-2.5-flash`) for summarization. API calls include an exponential backoff mechanism with up to 5 retries to handle rate limiting.
-*   **Command-line Argument**: Supports a `--full-summary-only` argument to skip chapter-by-chapter summarization and only generate the consolidated full summary from existing chapter summary files.
+*   **API Integration**: Utilizes either the Google Gemini API (default, `gemini-2.5-flash`) or the OpenAI API (via `--openai` flag). API calls include an exponential backoff mechanism with up to 5 retries to handle rate limiting.
+*   **Command-line Arguments**:
+    *   `--full-summary-only`: Skip chapter-by-chapter summarization and only generate the consolidated full summary from existing chapter summary files.
+    *   `--openai`: Use OpenAI's GPT-4o model for summarization (requires `OPENAI_API_KEY`).
+    *   `--chapters 1,3,5`: Specify which chapters to process (1-indexed). Use `5,*` to process from chapter 5 to the end. Wrap in quotes if using spaces or wildcards (e.g., `--chapters "18, *"`). Useful for idempotency and debugging.
+    *   `--localllm`: Use a local LLM (Ollama) for summarization.
 *   **Decoupled Functionality**: Summarization and image extraction are handled by separate scripts for modularity.
 
 ## Guidelines
@@ -34,4 +38,5 @@ This project provides Python scripts to process EPUB (electronic publication) fi
 *   **Clarity and Conciseness**: Summaries should be easy to understand and to the point. Should not use any other sources other than the book content.
 *   **Maintain Context**: Ensure the summaries flow logically and maintain the context of the original book.
 *   **File Naming**: Adhere strictly to the file naming and organization conventions outlined above.
+*   **Idempotency**: Use the `--chapters` flag to selectively re-run chapters without re-summarizing the entire book.
 *   **Image Handling**: Images found within a chapter will be extracted and appended to the end of the chapter's summary in Markdown format (`![context description](image_path)`). The `image_path` will be relative to the summary file.

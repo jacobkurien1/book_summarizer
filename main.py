@@ -10,7 +10,8 @@ from utils import (
     save_summary_to_file, 
     summarize_text,
     is_non_chapter_content,
-    get_logical_chapter_number
+    get_logical_chapter_number,
+    merge_and_split_chapters
 )
 from extract_images import create_image_map, extract_chapter_images_and_context
 
@@ -74,7 +75,7 @@ def main(epub_path, full_summary_only=False, use_local_llm=False, use_openai=Fal
         ]   
 
         image_map = create_image_map(book)
-        chapters_to_summarize = filter_chapters(book.get_items(), exclude_keywords)
+        chapters_data = merge_and_split_chapters(book, exclude_keywords)
         
         if chapters:
             print(f"Limiting to specific chapters: {chapters}")
@@ -89,9 +90,8 @@ def main(epub_path, full_summary_only=False, use_local_llm=False, use_openai=Fal
                     if not part:
                         continue
                     if '*' in part:
-                        # Handle start,* or just *
                         start_str = part.replace('*', '')
-                        if not start_str: # just "*"
+                        if not start_str: 
                             wildcard_start = last_num
                         else:
                             try:
@@ -104,38 +104,32 @@ def main(epub_path, full_summary_only=False, use_local_llm=False, use_openai=Fal
                             requested_numbers.add(last_num)
                         except ValueError:
                             print(f"Warning: Skipping invalid chapter number: {part}")
-                            print("Tip: If you are using spaces or wildcards, make sure to wrap the argument in quotes: --chapters \"18, *\"")
                 
                 filtered_chapters = []
-                for item in chapters_to_summarize:
-                    logical_num = get_logical_chapter_number(item.get_name())
+                for chap in chapters_data:
+                    logical_num = chap['logical_num']
                     if logical_num is not None:
                         is_requested = logical_num in requested_numbers
                         is_in_range = wildcard_start is not None and logical_num >= wildcard_start
                         if is_requested or is_in_range:
-                            filtered_chapters.append(item)
-                    else:
-                        # Skip items without numbers when filtering by number
-                        pass
+                            filtered_chapters.append(chap)
                 
-                chapters_to_summarize = filtered_chapters
+                chapters_data = filtered_chapters
             except ValueError as e:
                 print(f"Error parsing chapters: {chapters}. Error: {e}")
                 return
 
-        chapter_image_counts = {}
-
         print(f"Processing EPUB: {epub_path}")
 
-        for item in chapters_to_summarize:
-            chapter_content = get_chapter_content(item)
+        for chap in chapters_data:
+            chapter_name = chap['name']
+            chapter_content = chap['content']
+            
             if not chapter_content or len(chapter_content.strip()) < 100:
-                print(f"Skipping almost empty chapter: {item.get_name()}")
+                print(f"Skipping almost empty chapter: {chapter_name}")
                 continue
 
-            print(f"Summarizing chapter: {item.get_name()}")
-            
-            image_context = extract_chapter_images_and_context(item, image_map, output_base_dir, chapter_image_counts)
+            print(f"Summarizing: {chapter_name}")
             
             summary = summarize_text(
                 text_content=chapter_content,
@@ -145,15 +139,9 @@ def main(epub_path, full_summary_only=False, use_local_llm=False, use_openai=Fal
             )
             
             if summary:
-                if image_context:
-                    summary += "\n\n### Images\n\n"
-                    for img_info in image_context:
-                        relative_image_path = os.path.relpath(img_info["image_path"], os.path.dirname(os.path.join(output_base_dir, get_chapter_identifier(item.get_name()) + ".md")))
-                        summary += f"![{img_info['context_text']}]({relative_image_path})\n"
-
-                save_summary_to_file(summary, item.get_name(), output_base_dir)
+                save_summary_to_file(summary, chapter_name, output_base_dir)
             else:
-                print(f"Summarization failed for {item.get_name()}")
+                print(f"Summarization failed for {chapter_name}")
 
     create_final_summary(book_folder_name, output_base_dir, use_local_llm=use_local_llm, gemini_api_key=gemini_api_key, openai_api_key=openai_api_key if use_openai else None)
 

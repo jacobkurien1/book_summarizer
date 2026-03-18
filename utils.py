@@ -6,6 +6,7 @@ import google.generativeai as genai
 import requests
 import json
 import openai
+import ebooklib
 from bs4 import BeautifulSoup
 from openai import OpenAI
 
@@ -35,7 +36,7 @@ def get_book_output_folder(book: epub.EpubBook, default_name: str = "processed_b
     book_folder_name = sanitize_filename(book_folder_name_raw) # sanitize_filename no longer removes extensions
     return book_folder_name if book_folder_name else default_name
 
-def get_chapter_identifier(chapter_name_raw):
+def get_chapter_identifier(chapter_name_raw, item_content=None):
     simplified_name = chapter_name_raw.lower()
     # Aggressively clean the name for better identifier matching
     simplified_name = simplified_name.replace('text/', '')
@@ -86,6 +87,12 @@ def get_chapter_identifier(chapter_name_raw):
         if key in simplified_name:
             return value
 
+    # NEW: Content fallback
+    if item_content:
+        num = get_logical_chapter_number(chapter_name_raw, item_content)
+        if num is not None:
+            return f"chapter_{num}"
+
     # Fallback for other unidentifiable document items
     # Remove common prefixes and suffixes
     simplified_name = re.sub(r'^[a-z]+_.*?_', '', simplified_name) # a generic prefix remover
@@ -94,14 +101,87 @@ def get_chapter_identifier(chapter_name_raw):
 
     return sanitize_filename(simplified_name) if simplified_name else "unknown_section"
 
-def get_logical_chapter_number(chapter_name_raw):
-    """Extracts the logical chapter number from the filename/identifier."""
-    simplified_name = chapter_name_raw.lower()
-    simplified_name = simplified_name.replace('text/', '').replace('xhtml/', '')
-    match = re.search(r'(?:chapter|c|part)[_-]?(\d+)', simplified_name)
-    if match:
-        return int(match.group(1))
+def get_logical_chapter_number(text):
+    """Extracts a logical number from chapter text or titles."""
+    word_to_num = {
+        'one': 1, 'two': 2, 'three': 3, 'four': 4, 'five': 5,
+        'six': 6, 'seven': 7, 'eight': 8, 'nine': 9, 'ten': 10,
+        'eleven': 11, 'twelve': 12, 'thirteen': 13, 'fourteen': 14,
+        'fifteen': 15, 'sixteen': 16, 'seventeen': 17, 'eighteen': 18,
+        'nineteen': 19, 'twenty': 20
+    }
+    
+    # Try digit first
+    digit_match = re.search(r'\b(\d+)\b', text)
+    if digit_match:
+        return int(digit_match.group(1))
+        
+    # Try word
+    lower_text = text.lower()
+    for word, num in word_to_num.items():
+        if word in lower_text:
+            return num
+            
     return None
+
+def merge_and_split_chapters(book, exclude_keywords):
+    """
+    Merges all document items and splits them by chapter headers.
+    Returns a list of dicts: {'name': str, 'content': str, 'logical_num': int}
+    """
+    full_text = ""
+    # We use a dictionary to keep track of image locations if needed, 
+    # but for now, we just want to split the flow.
+    
+    for item in book.get_items():
+        if item.get_type() == ebooklib.ITEM_DOCUMENT:
+            name = item.get_name()
+            if any(kw in name.lower() for kw in exclude_keywords):
+                continue
+            
+            content = item.get_content().decode('utf-8', errors='ignore')
+            soup = BeautifulSoup(content, 'html.parser')
+            
+            # Simple text extraction for now. 
+            # In the future, we could preserve markers for images here.
+            full_text += soup.get_text(separator='\n') + "\n"
+
+    # Pattern for "Chapter One", "Chapter 1", "PART ONE", etc. at the start of a line
+    pattern = re.compile(r'(?im)^\s*(chapter|c|part)\s+(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|\d+)(?:<<@\d+>>)?\s*$')
+
+    splits = pattern.split(full_text)
+    chapters = []
+    
+    if len(splits) <= 1:
+        # Fallback: if no chapters found, return the whole thing as one chapter
+        chapters.append({
+            'name': 'Full Book Content',
+            'content': full_text,
+            'logical_num': 1
+        })
+        return chapters
+
+    # splits[0] is the intro/pre-chapter text
+    if splits[0].strip():
+        chapters.append({
+            'name': 'Introduction',
+            'content': splits[0].strip(),
+            'logical_num': 0
+        })
+
+    for i in range(1, len(splits), 3):
+        chap_type = splits[i]
+        chap_num_str = splits[i+1]
+        chap_content = splits[i+2].strip()
+        
+        logical_num = get_logical_chapter_number(chap_num_str)
+        chapters.append({
+            'name': f"{chap_type.capitalize()} {chap_num_str.capitalize()}",
+            'content': chap_content,
+            'logical_num': logical_num
+        })
+        
+    return chapters
 
 def is_non_chapter_content(content: str) -> bool:
     """Checks if the content is a non-chapter section."""
@@ -125,7 +205,6 @@ def is_non_chapter_content(content: str) -> bool:
 
 def get_chapter_title_from_content(content):
     """Extracts the chapter title from the chapter's content."""
-    from bs4 import BeautifulSoup
     soup = BeautifulSoup(content, 'html.parser')
     
     # Try to find the title in common heading tags
@@ -141,9 +220,9 @@ def get_chapter_title_from_content(content):
     
     return "Untitled Chapter"
 
-def save_summary_to_file(summary, item_name, output_dir):
+def save_summary_to_file(summary, item_name, output_dir, item_content=None):
     """Saves the summary to a Markdown file."""
-    chapter_identifier = get_chapter_identifier(item_name)
+    chapter_identifier = get_chapter_identifier(item_name, item_content)
     filename = f"{chapter_identifier}.md"
     chapter_output_path = os.path.join(output_dir, filename)
     os.makedirs(os.path.dirname(chapter_output_path), exist_ok=True)
@@ -220,18 +299,23 @@ def get_local_llm_system_prompt() -> str:
 def summarize_text_with_gemini(prompt, api_key):
     genai.configure(api_key=api_key)
     model = genai.GenerativeModel('gemini-2.5-flash')
-    initial_delay = 10
-    max_retries = 5
-    delay = initial_delay
+    delay = 60 # Wait exactly 60 seconds for 1-minute quota limits to reset
+    max_retries = 10
     for i in range(max_retries):
         try:
             response = model.generate_content(prompt)
             return response.text
         except Exception as e:
-            if "429" in str(e):
-                print(f"Rate limit exceeded. Retrying in {delay} seconds...")
-                time.sleep(delay)
-                delay *= 2
+            error_str = str(e)
+            if "429" in error_str:
+                wait_time = delay
+                match = re.search(r'Please retry in (\d+\.?\d*)s', error_str)
+                if match:
+                    parsed_time = float(match.group(1)) + 2.0
+                    wait_time = max(delay, parsed_time) # Enforce minimum 60s wait
+                
+                print(f"Rate limit exceeded. Waiting {wait_time:.1f} seconds for quota reset...")
+                time.sleep(wait_time)
             else:
                 print(f"Error summarizing text with Gemini API: {e}")
                 return None
@@ -261,9 +345,8 @@ def summarize_text_with_local_llm(system_prompt, prompt):
 
 def summarize_text_with_openai(prompt, api_key):
     client = OpenAI(api_key=api_key)
-    initial_delay = 5
-    max_retries = 5
-    delay = initial_delay
+    delay = 60 # Wait exactly 60 seconds for 1-minute quota limits to reset
+    max_retries = 10
     
     for i in range(max_retries):
         try:
@@ -279,9 +362,8 @@ def summarize_text_with_openai(prompt, api_key):
             return response.choices[0].message.content
         except Exception as e:
             if "rate_limit" in str(e).lower() or "429" in str(e):
-                print(f"OpenAI Rate limit exceeded. Retrying in {delay} seconds...")
+                print(f"OpenAI Rate limit exceeded. Waiting {delay} seconds for quota reset...")
                 time.sleep(delay)
-                delay *= 2
             else:
                 print(f"Error summarizing text with OpenAI API: {e}")
                 return None

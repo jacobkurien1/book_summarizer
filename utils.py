@@ -188,18 +188,32 @@ def _process_spine_items(book, exclude_keywords, image_map, output_dir):
 
 def _split_text_into_chapters(full_text):
     """Splits unified text into chapters and extracts markdown image links."""
+    # Mandatory keyword (chapter|c|part) to prevent page numbers from starting chapters.
+    # The internal <<@CHAPTER:n>> marker remains the ultimate truth.
     pattern = re.compile(
-        r"(?im)^\s*(?:(?:(chapter|c|part)\s+)?(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|\d+)|<<@CHAPTER:(\d+)>>)\s*$"
+        r"(?im)^\s*(?:(?:(chapter|c|part)\s+)(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|\d+)|<<@CHAPTER:(\d+)>>)\s*$"
     )
     splits = pattern.split(full_text)
-    chapters = []
-
+    
     if len(splits) <= 1:
         full_text_clean, images = parse_markdown_images_from_text(full_text)
         return [{"name": "Full Book Content", "content": full_text_clean, "logical_num": 1, "images": images}]
 
+    # We use a dict to merge fragments of the same chapter together globally
+    chapters_map = {}
+    # Track order of first appearance
+    order = []
+
+    # Handle text before the first marker (Introduction)
     if splits[0].strip():
-        chapters.append({"name": "Introduction", "content": splits[0].strip(), "logical_num": 0, "images": []})
+        intro_content, intro_images = parse_markdown_images_from_text(splits[0].strip())
+        chapters_map[0] = {
+            "name": "Introduction",
+            "content": intro_content,
+            "logical_num": 0,
+            "images": intro_images
+        }
+        order.append(0)
 
     for i in range(1, len(splits), 4):
         chap_type = splits[i]
@@ -217,22 +231,30 @@ def _split_text_into_chapters(full_text):
 
         chap_content_clean, chap_images = parse_markdown_images_from_text(chap_content)
 
-        if chapters and chapters[-1]["logical_num"] == logical_num:
-            chapters[-1]["images"].extend(chap_images)
+        if logical_num in chapters_map:
+            chapters_map[logical_num]["images"].extend(chap_images)
             if chap_content_clean:
-                if chapters[-1]["content"]:
-                    chapters[-1]["content"] += "\n\n" + chap_content_clean
+                if chapters_map[logical_num]["content"]:
+                    chapters_map[logical_num]["content"] += "\n\n" + chap_content_clean
                 else:
-                    chapters[-1]["content"] = chap_content_clean
+                    chapters_map[logical_num]["content"] = chap_content_clean
         else:
-            chapters.append({
+            chapters_map[logical_num] = {
                 "name": name,
                 "content": chap_content_clean,
                 "logical_num": logical_num,
                 "images": chap_images,
-            })
+            }
+            order.append(logical_num)
 
-    return [c for c in chapters if c["content"].strip() or c["images"] or c["logical_num"] == 0]
+    # Return chapters in the order they first appeared
+    final_chapters = []
+    for num in order:
+        chap = chapters_map[num]
+        if chap["content"].strip() or chap["images"] or chap["logical_num"] == 0:
+            final_chapters.append(chap)
+    
+    return final_chapters
 
 def merge_and_split_chapters(book, exclude_keywords, image_map=None, output_dir=None):
     """

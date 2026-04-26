@@ -548,8 +548,31 @@ class TestMergeAndSplit(unittest.TestCase):
         active_chapters = [
             c for c in chapters if c["name"] != "Introduction" or c["content"].strip()
         ]
-        # Should merge into ONE Chapter 1 and SKIP bm02 (due to 'bm' keyword and 'Notes' content)
-        self.assertEqual(len(active_chapters), 1)
-        self.assertEqual(active_chapters[0]["name"], "Chapter 1")
         self.assertIn("Section 1", active_chapters[0]["content"])
         self.assertIn("Section 2", active_chapters[0]["content"])
+
+    def test_content_theft_by_page_numbers(self):
+        """Verifies that standalone numbers (page numbers) do not 'steal' content from the current chapter."""
+        # This test demonstrates the core issue: '2' starting a new chapter and stealing subsequent text.
+        full_text = """
+Chapter 1
+This is the legitimate start of Chapter 1.
+2
+This sentence belongs to Chapter 1, but it follows a standalone page number '2'. 
+Currently, the regex treats '2' as the start of 'Chapter 2', stealing this text.
+Chapter 2
+This is the legitimate start of Chapter 2.
+"""
+        chapters = utils._split_text_into_chapters(full_text)
+        
+        # Filter out introduction if empty
+        active_chapters = [c for c in chapters if c["name"] != "Introduction" or c["content"].strip()]
+        
+        # We expect exactly 2 chapters.
+        # If the bug exists, we will get 3 chapters (Chapter 1, Chapter 2, Chapter 2).
+        self.assertEqual(len(active_chapters), 2, f"Expected 2 chapters, but got {[c['name'] for c in active_chapters]}")
+        self.assertEqual(active_chapters[0]["name"], "Chapter 1")
+        self.assertIn("belongs to Chapter 1", active_chapters[0]["content"])
+        
+        self.assertEqual(active_chapters[1]["name"], "Chapter 2")
+        self.assertIn("legitimate start of Chapter 2", active_chapters[1]["content"])

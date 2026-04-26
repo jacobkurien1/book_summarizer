@@ -1,0 +1,22 @@
+[MASTER]
+# Specify a configuration file.
+#rcfile=
+
+[MESSAGES CONTROL]
+# Disable the message, report, category or checker with the given id(s).
+# W0718: broad-exception-caught (since we interact with multiple dynamic APIs, this is often expected)
+disable=W0718
+
+[FORMAT]
+# Maximum number of characters on a single line. (Black uses 88)
+max-line-length=88
+
+[DESIGN]
+# Maximum number of arguments for function / method.
+max-args=6
+
+# Maximum number of locals for function / method body.
+max-locals=20
+
+# Maximum number of branch for function / method body.
+max-branches=15

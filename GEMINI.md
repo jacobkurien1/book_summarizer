@@ -30,7 +30,8 @@ This project provides Python scripts to process EPUB (electronic publication) fi
     *   `--full-summary-only`: Skip chapter-by-chapter summarization and only generate the consolidated full summary from existing chapter summary files.
     *   `--openai`: Use OpenAI's GPT-4o model for summarization (requires `OPENAI_API_KEY`).
     *   `--chapters 1,3,5`: Specify which chapters to process (1-indexed). Use `5,*` to process from chapter 5 to the end. Wrap in quotes if using spaces or wildcards (e.g., `--chapters "18, *"`). Useful for idempotency and debugging.
-    *   `--localllm`: Use a local LLM (Ollama) for summarization.
+    *   `--localllm`: Use a local LLM (Ollama) for summarization. The model defaults to `gpt-oss:20b`. You can customize this by setting the `OLLAMA_MODEL` environment variable (e.g., `export OLLAMA_MODEL=deepseek-r1`).
+    *   `--hybrid`: Use a local LLM for chapter-by-chapter summarization, but use Gemini (or OpenAI if `--openai` is provided) for the final consolidated full book summary.
 *   **Decoupled Functionality**: Summarization and image extraction are handled by separate scripts for modularity.
 
 ## Guidelines

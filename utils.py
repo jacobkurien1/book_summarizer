@@ -7,8 +7,15 @@ import requests
 import json
 import openai
 import ebooklib
+from extract_images import extract_and_mark_images, parse_markdown_images_from_text
 from bs4 import BeautifulSoup
 from openai import OpenAI
+
+from urllib.parse import unquote
+import html
+
+def unescape(text):
+    return html.unescape(text)
 
 def sanitize_filename(name):
     # Separate base and extension first from the original name
@@ -89,7 +96,8 @@ def get_chapter_identifier(chapter_name_raw, item_content=None):
 
     # NEW: Content fallback
     if item_content:
-        num = get_logical_chapter_number(chapter_name_raw, item_content)
+        # Pass only content to extract logical number
+        num = get_logical_chapter_number(item_content)
         if num is not None:
             return f"chapter_{num}"
 
@@ -124,40 +132,76 @@ def get_logical_chapter_number(text):
             
     return None
 
-def merge_and_split_chapters(book, exclude_keywords):
+def merge_and_split_chapters(book, exclude_keywords, image_map=None, output_dir=None):
     """
-    Merges all document items and splits them by chapter headers.
-    Returns a list of dicts: {'name': str, 'content': str, 'logical_num': int}
+    Merges document items from the spine and splits them by chapter headers/markers.
+    Returns a list of dicts: {'name': str, 'content': str, 'logical_num': int, 'images': list}
     """
     full_text = ""
-    # We use a dictionary to keep track of image locations if needed, 
-    # but for now, we just want to split the flow.
+    global_img_counter = 0
     
-    for item in book.get_items():
-        if item.get_type() == ebooklib.ITEM_DOCUMENT:
-            name = item.get_name()
-            if any(kw in name.lower() for kw in exclude_keywords):
-                continue
+    # Get items by ID for spine lookup to ensure correct order
+    items_by_id = {item.get_id(): item for item in book.get_items()}
+    
+    current_chapter_id = None
+    
+    for spine_item in book.spine:
+        item_id = spine_item[0]
+        item = items_by_id.get(item_id)
+        if not item or item.get_type() != ebooklib.ITEM_DOCUMENT:
+            continue
             
-            content = item.get_content().decode('utf-8', errors='ignore')
-            soup = BeautifulSoup(content, 'html.parser')
+        name = item.get_name()
+        if any(kw in name.lower() for kw in exclude_keywords):
+            continue
             
-            # Simple text extraction for now. 
-            # In the future, we could preserve markers for images here.
-            full_text += soup.get_text(separator='\n') + "\n"
+        content = item.get_content().decode('utf-8', errors='ignore')
+        
+        # NEW: Content-based filtering to skip non-chapter sections during merge
+        if is_non_chapter_content(content):
+            continue
+        
+        # Step 1: Spine-based detection (Preferred)
+        # Check if this file identifies as a new chapter
+        new_id = get_chapter_identifier(name, content)
+        if new_id and new_id.startswith('chapter_') and new_id != current_chapter_id:
+            match = re.search(r'\d+', new_id)
+            if match:
+                num = match.group()
+                # Insert a unique marker to avoid double-splitting with natural text
+                full_text += f"\n<<@CHAPTER:{num}>>\n"
+            current_chapter_id = new_id
+        
+        if image_map and output_dir:
+            content, global_img_counter = extract_and_mark_images(
+                html_content=content, 
+                item_name=name, 
+                image_map=image_map, 
+                output_dir=output_dir, 
+                img_counter=global_img_counter
+            )
 
-    # Pattern for "Chapter One", "Chapter 1", "PART ONE", etc. at the start of a line
-    pattern = re.compile(r'(?im)^\s*(chapter|c|part)\s+(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|\d+)(?:<<@\d+>>)?\s*$')
+        soup = BeautifulSoup(content, 'html.parser')
+        full_text += soup.get_text(separator='\n') + "\n"
+
+    # Pattern for natural headers OR our inserted markers
+    # Group 1: Prefix (Chapter/Part), Group 2: Number/Word, Group 3: Marker Number
+    pattern = re.compile(r'(?im)^\s*(?:(?:(chapter|c|part)\s+)?(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|\d+)|<<@CHAPTER:(\d+)>>)\s*$')
 
     splits = pattern.split(full_text)
     chapters = []
     
     if len(splits) <= 1:
         # Fallback: if no chapters found, return the whole thing as one chapter
+        
+        # Extract images from full_text
+        full_text_clean, images = parse_markdown_images_from_text(full_text)
+        
         chapters.append({
             'name': 'Full Book Content',
-            'content': full_text,
-            'logical_num': 1
+            'content': full_text_clean,
+            'logical_num': 1,
+            'images': images
         })
         return chapters
 
@@ -169,19 +213,44 @@ def merge_and_split_chapters(book, exclude_keywords):
             'logical_num': 0
         })
 
-    for i in range(1, len(splits), 3):
+    # pattern.split with 3 capturing groups gives: [pre, group1, group2, group3, post, ...]
+    for i in range(1, len(splits), 4):
         chap_type = splits[i]
         chap_num_str = splits[i+1]
-        chap_content = splits[i+2].strip()
+        marker_num = splits[i+2]
+        chap_content = splits[i+3].strip()
         
-        logical_num = get_logical_chapter_number(chap_num_str)
-        chapters.append({
-            'name': f"{chap_type.capitalize()} {chap_num_str.capitalize()}",
-            'content': chap_content,
-            'logical_num': logical_num
-        })
+        if marker_num:
+            # Marker split
+            logical_num = int(marker_num)
+            name = f"Chapter {logical_num}"
+        else:
+            # Natural header split
+            logical_num = get_logical_chapter_number(chap_num_str)
+            name_prefix = chap_type.capitalize() if chap_type else "Chapter"
+            name = f"{name_prefix} {chap_num_str.capitalize()}"
         
-    return chapters
+        # Extract images from this chapter's chunk
+        chap_content_clean, chap_images = parse_markdown_images_from_text(chap_content)
+
+        # Merge logic: if this chapter seems to be a continuation or duplicate of the last one
+        if chapters and chapters[-1]['logical_num'] == logical_num:
+            chapters[-1]['images'].extend(chap_images)
+            if chap_content_clean:
+                if chapters[-1]['content']:
+                    chapters[-1]['content'] += "\n\n" + chap_content_clean
+                else:
+                    chapters[-1]['content'] = chap_content_clean
+        else:
+            chapters.append({
+                'name': name,
+                'content': chap_content_clean,
+                'logical_num': logical_num,
+                'images': chap_images
+            })
+        
+    # Final pass: remove almost empty chapters that might have been created by stray numbers
+    return [c for c in chapters if c['content'].strip() or c['images'] or c['logical_num'] == 0]
 
 def is_non_chapter_content(content: str) -> bool:
     """Checks if the content is a non-chapter section."""
@@ -189,7 +258,7 @@ def is_non_chapter_content(content: str) -> bool:
         "dedication", "copyright", "acknowledgments", "title page", 
         "table of contents", "epigraph", "author's note", "publisher", "isbn",
         "frontmatter", "halftitle", "bibliography", "references",
-        "footnote", "footnotes"
+        "footnote", "footnotes", "notes", "endnotes", "further reading"
     ]
     
     soup = BeautifulSoup(content, 'html.parser')
@@ -322,11 +391,32 @@ def summarize_text_with_gemini(prompt, api_key):
     print("Failed to summarize text after multiple retries.")
     return None
 
+def get_running_ollama_model():
+    """Queries the local Ollama API to find the currently running/loaded model."""
+    try:
+        response = requests.get("http://localhost:11434/api/ps", timeout=2)
+        response.raise_for_status()
+        data = response.json()
+        if data.get("models") and len(data["models"]) > 0:
+            return data["models"][0]["name"]
+    except Exception as e:
+        print(f"Could not automatically detect running Ollama model: {e}")
+    return None
+
 def summarize_text_with_local_llm(system_prompt, prompt):
     url = "http://localhost:11434/api/generate"
     headers = {"Content-Type": "application/json"}
+    
+    # Auto-detect running model or fallback to env var / default
+    ollama_model = os.getenv("OLLAMA_MODEL")
+    if not ollama_model:
+        detected_model = get_running_ollama_model()
+        ollama_model = detected_model if detected_model else "gpt-oss:20b"
+    
+    print(f"Local LLM: Using model '{ollama_model}'")
+    
     data = {
-        "model": "deepseek-r1",
+        "model": ollama_model,
         "system": system_prompt,
         "prompt": prompt,
         "stream": False

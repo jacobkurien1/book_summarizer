@@ -116,6 +116,12 @@ class TestSummarizationWithBackoff(unittest.TestCase):
         self.assertEqual(mock_sleep.call_count, 2)
         mock_sleep.assert_has_calls([call(60), call(60)])
 
+    def test_is_non_chapter_content_notes(self):
+        self.assertTrue(utils.is_non_chapter_content("<html><body>Notes<br/>1. Ref...</body></html>"))
+        self.assertTrue(utils.is_non_chapter_content("<html><body>Endnotes<br/>1. Ref...</body></html>"))
+        self.assertTrue(utils.is_non_chapter_content("<html><body>Further Reading<br/>...</body></html>"))
+        self.assertFalse(utils.is_non_chapter_content("<html><body>Chapter 1<br/>Regular content...</body></html>"))
+
 if __name__ == '__main__':
     unittest.main()
 
@@ -255,9 +261,10 @@ class TestMergeAndSplit(unittest.TestCase):
     def test_merge_and_split_chapters(self):
         # Arrange
         class MockItem:
-            def __init__(self, name, content):
+            def __init__(self, name, content, item_id=None):
                 self.name = name
                 self.content = content
+                self.item_id = item_id or name
             def get_type(self):
                 import ebooklib
                 return ebooklib.ITEM_DOCUMENT
@@ -265,6 +272,8 @@ class TestMergeAndSplit(unittest.TestCase):
                 return self.name
             def get_content(self):
                 return self.content.encode('utf-8')
+            def get_id(self):
+                return self.item_id
 
         mock_items = [
             MockItem("page1.html", "<html><body>Chapter One<br/>This is content 1</body></html>"),
@@ -272,10 +281,15 @@ class TestMergeAndSplit(unittest.TestCase):
         ]
         
         class MockBook:
+            def __init__(self, items):
+                self.items = items
             def get_items(self):
-                return mock_items
+                return self.items
+            @property
+            def spine(self):
+                return [(item.get_id(), "yes") for item in self.items]
         
-        mock_book = MockBook()
+        mock_book = MockBook(mock_items)
         exclude_keywords = []
 
         # Act
@@ -294,7 +308,93 @@ class TestMergeAndSplit(unittest.TestCase):
         
         active_chapters = [c for c in chapters if c['name'] != 'Introduction' or c['content'].strip()]
         self.assertEqual(len(active_chapters), 2)
-        self.assertEqual(active_chapters[0]['name'], "Chapter One")
+        self.assertEqual(active_chapters[0]['name'], "Chapter 1")
         self.assertEqual(active_chapters[0]['logical_num'], 1)
-        self.assertEqual(active_chapters[1]['name'], "Chapter Two")
+        self.assertEqual(active_chapters[1]['name'], "Chapter 2")
         self.assertEqual(active_chapters[1]['logical_num'], 2)
+
+    def test_hybrid_chapter_detection(self):
+        # Simulates "The Winner Effect" structure
+        class MockItem:
+            def __init__(self, name, content, item_id):
+                self.name = name
+                self.content = content
+                self.item_id = item_id
+            def get_type(self):
+                import ebooklib
+                return ebooklib.ITEM_DOCUMENT
+            def get_name(self):
+                return self.name
+            def get_content(self):
+                return self.content.encode('utf-8')
+            def get_id(self):
+                return self.item_id
+
+        mock_items = [
+            MockItem("c01.html", "<html><body>1<br/>The Mystery of Picasso’s Son<br/>Content 1</body></html>", "c1"),
+            MockItem("c02.html", "<html><body>2<br/>The Puzzle of the Changeling Fish<br/>Content 2</body></html>", "c2")
+        ]
+        
+        class MockBook:
+            def get_items(self):
+                return mock_items
+            @property
+            def spine(self):
+                return [("c1", "yes"), ("c2", "yes")]
+        
+        mock_book = MockBook()
+        exclude_keywords = []
+
+        # Act
+        chapters = utils.merge_and_split_chapters(mock_book, exclude_keywords)
+
+        # Assert
+        active_chapters = [c for c in chapters if c['name'] != 'Introduction' or c['content'].strip()]
+        self.assertEqual(len(active_chapters), 2)
+        # It should detect Chapter 1 and Chapter 2 from the filenames c01.html, c02.html
+        self.assertEqual(active_chapters[0]['name'], "Chapter 1")
+        self.assertEqual(active_chapters[1]['name'], "Chapter 2")
+
+    def test_duplicate_chapter_merging(self):
+        # Simulates a case where both marker and natural header match, or multiple files have headers
+        class MockItem:
+            def __init__(self, name, content, item_id):
+                self.name = name
+                self.content = content
+                self.item_id = item_id
+            def get_type(self):
+                import ebooklib
+                return ebooklib.ITEM_DOCUMENT
+            def get_name(self):
+                return self.name
+            def get_content(self):
+                return self.content.encode('utf-8')
+            def get_id(self):
+                return self.item_id
+
+        mock_items = [
+            MockItem("c01.html", "<html><body>1<br/>Section 1</body></html>", "c1"),
+            MockItem("c01_2.html", "<html><body>1<br/>Section 2</body></html>", "c1_2"),
+            MockItem("bm02.html", "<html><body>Notes<br/>1. Reference</body></html>", "bm2")
+        ]
+        
+        class MockBook:
+            def get_items(self):
+                return mock_items
+            @property
+            def spine(self):
+                return [("c1", "yes"), ("c1_2", "yes"), ("bm2", "yes")]
+        
+        mock_book = MockBook()
+        exclude_keywords = ["bm"]
+
+        # Act
+        chapters = utils.merge_and_split_chapters(mock_book, exclude_keywords)
+
+        # Assert
+        active_chapters = [c for c in chapters if c['name'] != 'Introduction' or c['content'].strip()]
+        # Should merge into ONE Chapter 1 and SKIP bm02 (due to 'bm' keyword and 'Notes' content)
+        self.assertEqual(len(active_chapters), 1)
+        self.assertEqual(active_chapters[0]['name'], "Chapter 1")
+        self.assertIn("Section 1", active_chapters[0]['content'])
+        self.assertIn("Section 2", active_chapters[0]['content'])

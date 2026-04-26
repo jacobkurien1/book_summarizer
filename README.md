@@ -46,6 +46,20 @@ This project provides a suite of Python scripts to process and summarize e-books
     ```
     Replace `YOUR_ACTUAL_GEMINI_API_KEY_HERE` with your actual API key.
 
+3.  **Set up Ollama (Optional, for local LLMs):**
+    To use a local LLM instead of Gemini or OpenAI, you need to install Ollama and download the desired model.
+    *   Download and install Ollama from [ollama.com](https://ollama.com).
+    *   Once installed, open your terminal and pull the model you want to use. For example, to use the `gpt-oss:20b` model, run:
+        ```bash
+        ollama run gpt-oss:20b
+        ```
+    *   This starts the Ollama API locally (defaulting to `http://localhost:11434/api/generate`).
+    *   **Auto-Detection**: The script will automatically connect to whichever model you are currently running in your terminal. If no model is running, it defaults to `gpt-oss:20b`.
+    *   (Optional) You can permanently force a specific model by setting the `OLLAMA_MODEL` environment variable in your terminal or `.env` file:
+        ```
+        OLLAMA_MODEL=deepseek-r1
+        ```
+
 ## Usage
 
 To generate chapter summaries and a full book summary:
@@ -56,6 +70,16 @@ python main.py "path/to/your/book.epub"
 To generate only the full book summary from existing chapter summaries:
 ```bash
 python main.py "path/to/your/book.epub" --full-summary-only
+```
+
+To use a local LLM (Ollama) instead of Gemini for all summaries:
+```bash
+python main.py "path/to/your/book.epub" --localllm
+```
+
+To use a local LLM for chapter summaries and Gemini for the final full book summary:
+```bash
+python main.py "path/to/your/book.epub" --hybrid
 ```
 
 The output will be saved in a new directory named after the book's title.

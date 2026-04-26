@@ -13,7 +13,7 @@ from utils import (
     get_logical_chapter_number,
     merge_and_split_chapters
 )
-from extract_images import create_image_map, extract_chapter_images_and_context
+from extract_images import create_image_map
 
 load_dotenv()
 
@@ -43,7 +43,7 @@ def filter_chapters(items, exclude_keywords):
     return chapters
 
 
-def main(epub_path, full_summary_only=False, use_local_llm=False, use_openai=False, chapters=None):
+def main(epub_path, full_summary_only=False, use_local_llm=False, use_openai=False, chapters=None, use_hybrid=False):
     if not os.path.exists(epub_path):
         print(f"Error: EPUB file not found at {epub_path}")
         return
@@ -71,11 +71,11 @@ def main(epub_path, full_summary_only=False, use_local_llm=False, use_openai=Fal
             "acknowledgments", "about_the_author", "ba1", "copyright",
             "credits", "publisher", "preface", "foreword", "epilogue",
             "appendix", "index", "glossary", "bibliography", "frontmatter",
-            "footnote", "footnotes", "contents", "toc"
+            "footnote", "footnotes", "contents", "toc", "notes", "bm"
         ]   
 
         image_map = create_image_map(book)
-        chapters_data = merge_and_split_chapters(book, exclude_keywords)
+        chapters_data = merge_and_split_chapters(book, exclude_keywords, image_map=image_map, output_dir=output_base_dir)
         
         if chapters:
             print(f"Limiting to specific chapters: {chapters}")
@@ -133,17 +133,20 @@ def main(epub_path, full_summary_only=False, use_local_llm=False, use_openai=Fal
             
             summary = summarize_text(
                 text_content=chapter_content,
-                use_local_llm=use_local_llm,
+                use_local_llm=use_local_llm or use_hybrid,
                 gemini_api_key=gemini_api_key,
                 openai_api_key=openai_api_key if use_openai else None
             )
             
             if summary:
+                # Append extracted images to the summary
+                if chap.get('images'):
+                    summary += "\n\n" + "\n\n".join(chap['images'])
                 save_summary_to_file(summary, chapter_name, output_base_dir)
             else:
                 print(f"Summarization failed for {chapter_name}")
 
-    create_final_summary(book_folder_name, output_base_dir, use_local_llm=use_local_llm, gemini_api_key=gemini_api_key, openai_api_key=openai_api_key if use_openai else None)
+    create_final_summary(book_folder_name, output_base_dir, use_local_llm=use_local_llm and not use_hybrid, gemini_api_key=gemini_api_key, openai_api_key=openai_api_key if use_openai else None)
 
 def create_final_summary(book_folder_name, output_base_dir, use_local_llm=False, gemini_api_key=None, openai_api_key=None):
     print("\nGenerating final summary...")
@@ -180,7 +183,7 @@ def create_final_summary(book_folder_name, output_base_dir, use_local_llm=False,
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Usage: python main.py <path_to_epub_file> [--full-summary-only] [--localllm] [--openai] [--chapters 1,3,5]")
+        print("Usage: python main.py <path_to_epub_file> [--full-summary-only] [--localllm] [--openai] [--chapters 1,3,5] [--hybrid]")
         sys.exit(1)
 
     epub_file = sys.argv[1]
@@ -190,6 +193,7 @@ if __name__ == "__main__":
     full_summary_only = "--full-summary-only" in sys.argv
     use_local_llm = "--localllm" in sys.argv
     use_openai = "--openai" in sys.argv
+    use_hybrid = "--hybrid" in sys.argv
 
     # Parse optional --chapters argument
     chapters_arg = None
@@ -202,4 +206,4 @@ if __name__ == "__main__":
             print("--chapters flag requires a comma‑separated list of chapter numbers (e.g. '1,3,5' or '5,*')")
             sys.exit(1)
 
-    main(epub_file, full_summary_only=full_summary_only, use_local_llm=use_local_llm, use_openai=use_openai, chapters=chapters_arg)
+    main(epub_file, full_summary_only=full_summary_only, use_local_llm=use_local_llm, use_openai=use_openai, chapters=chapters_arg, use_hybrid=use_hybrid)

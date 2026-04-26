@@ -12,13 +12,13 @@ class TestMain(unittest.TestCase):
     @patch('builtins.open', new_callable=unittest.mock.mock_open, read_data='summary')
     @patch('os.listdir', return_value=['summary1.md'])
     @patch('main.create_image_map')
-    @patch('main.extract_chapter_images_and_context')
     @patch('main.epub.read_epub')
     @patch('main.summarize_text')
     @patch('main.save_summary_to_file')
     @patch('os.makedirs')
     @patch('os.path.exists', return_value=True)
-    def test_main_orchestration(self, mock_exists, mock_makedirs, mock_save_summary, mock_summarize, mock_read_epub, mock_extract_images, mock_create_image_map, mock_listdir, mock_open):
+    @patch('main.merge_and_split_chapters')
+    def test_main_orchestration(self, mock_merge, mock_exists, mock_makedirs, mock_save_summary, mock_summarize, mock_read_epub, mock_create_image_map, mock_listdir, mock_open):
         # Arrange
         mock_book = MagicMock()
         mock_chapter_item = MagicMock()
@@ -33,9 +33,13 @@ class TestMain(unittest.TestCase):
         mock_book.get_items.return_value = [mock_chapter_item, mock_non_chapter_item]
         mock_book.get_metadata.return_value = [('Test Book', {})]
         mock_read_epub.return_value = mock_book
+        
+        mock_merge.return_value = [
+            {'name': 'chapter1.xhtml', 'content': 'This is the content that needs to be long enough to pass the 100 character threshold check in main.py. So let us add some more text here to be sure.', 'logical_num': 1}
+        ]
+        
         mock_summarize.return_value = "This is a summary."
         mock_create_image_map.return_value = {"image.jpg": b"fakedata"}
-        mock_extract_images.return_value = []
 
         epub_path = "/fake/path/to/book.epub"
 
@@ -46,19 +50,18 @@ class TestMain(unittest.TestCase):
         # Assert
         mock_read_epub.assert_called_once_with(epub_path)
         mock_create_image_map.assert_called_once_with(mock_book)
-        mock_extract_images.assert_called_once_with(mock_chapter_item, {"image.jpg": b"fakedata"}, unittest.mock.ANY, unittest.mock.ANY)
         mock_summarize.assert_called()
         mock_save_summary.assert_called_once_with("This is a summary.", "chapter1.xhtml", unittest.mock.ANY)
     @patch('builtins.open', new_callable=unittest.mock.mock_open, read_data='summary')
     @patch('os.listdir', return_value=['summary1.md'])
     @patch('main.create_image_map')
-    @patch('main.extract_chapter_images_and_context')
     @patch('main.epub.read_epub')
     @patch('main.summarize_text')
     @patch('main.save_summary_to_file')
     @patch('os.makedirs')
     @patch('os.path.exists', return_value=True)
-    def test_main_with_wildcard_chapters(self, mock_exists, mock_makedirs, mock_save_summary, mock_summarize, mock_read_epub, mock_extract_images, mock_create_image_map, mock_listdir, mock_open):
+    @patch('main.merge_and_split_chapters')
+    def test_main_with_wildcard_chapters(self, mock_merge, mock_exists, mock_makedirs, mock_save_summary, mock_summarize, mock_read_epub, mock_create_image_map, mock_listdir, mock_open):
         # Arrange: 3 chapters
         mock_book = MagicMock()
         chapters = []
@@ -72,9 +75,15 @@ class TestMain(unittest.TestCase):
         mock_book.get_items.return_value = chapters
         mock_book.get_metadata.return_value = [('Test Book', {})]
         mock_read_epub.return_value = mock_book
+        
+        mock_merge.return_value = [
+            {'name': 'chapter1.xhtml', 'content': 'Content ' * 20, 'logical_num': 1},
+            {'name': 'chapter2.xhtml', 'content': 'Content ' * 20, 'logical_num': 2},
+            {'name': 'chapter3.xhtml', 'content': 'Content ' * 20, 'logical_num': 3}
+        ]
+        
         mock_summarize.return_value = "Summary"
         mock_create_image_map.return_value = {}
-        mock_extract_images.return_value = []
 
         # Act: "2,*" should process chapters 2 and 3
         with patch.dict(os.environ, {'GEMINI_API_KEY': 'fake_key'}):
@@ -89,13 +98,13 @@ class TestMain(unittest.TestCase):
     @patch('builtins.open', new_callable=unittest.mock.mock_open, read_data='summary')
     @patch('os.listdir', return_value=['summary1.md'])
     @patch('main.create_image_map')
-    @patch('main.extract_chapter_images_and_context')
     @patch('main.epub.read_epub')
     @patch('main.summarize_text')
     @patch('main.save_summary_to_file')
     @patch('os.makedirs')
     @patch('os.path.exists', return_value=True)
-    def test_main_with_invalid_chapters_parsing(self, mock_exists, mock_makedirs, mock_save_summary, mock_summarize, mock_read_epub, mock_extract_images, mock_create_image_map, mock_listdir, mock_open):
+    @patch('main.merge_and_split_chapters')
+    def test_main_with_invalid_chapters_parsing(self, mock_merge, mock_exists, mock_makedirs, mock_save_summary, mock_summarize, mock_read_epub, mock_create_image_map, mock_listdir, mock_open):
         # Arrange: 3 chapters
         mock_book = MagicMock()
         chapters = []
@@ -109,9 +118,15 @@ class TestMain(unittest.TestCase):
         mock_book.get_items.return_value = chapters
         mock_book.get_metadata.return_value = [('Test Book', {})]
         mock_read_epub.return_value = mock_book
+        
+        mock_merge.return_value = [
+            {'name': 'chapter1.xhtml', 'content': 'Content ' * 20, 'logical_num': 1},
+            {'name': 'chapter2.xhtml', 'content': 'Content ' * 20, 'logical_num': 2},
+            {'name': 'chapter3.xhtml', 'content': 'Content ' * 20, 'logical_num': 3}
+        ]
+        
         mock_summarize.return_value = "Summary"
         mock_create_image_map.return_value = {}
-        mock_extract_images.return_value = []
 
         # Act: "2, invalid, *" should handle "2" and "*" relative to "2"
         with patch.dict(os.environ, {'GEMINI_API_KEY': 'fake_key'}):

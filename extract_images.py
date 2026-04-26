@@ -6,7 +6,7 @@ import re
 import sys
 from bs4 import BeautifulSoup
 from urllib.parse import unquote
-from utils import sanitize_filename, get_book_output_folder, get_chapter_identifier
+import utils
 
 def create_image_map(book):
     """Creates a map of all images in the EPUB, mapping their internal paths to their content."""
@@ -24,38 +24,63 @@ def create_image_map(book):
             image_map[item.get_name()] = item.get_content()
     return image_map
 
-def extract_chapter_images_and_context(chapter_item, image_map, output_dir, chapter_image_counts):
-    """Extracts images from a chapter, saves them, and returns their context."""
-    image_context = []
-    chapter_identifier = get_chapter_identifier(chapter_item.get_name())
-    soup = BeautifulSoup(chapter_item.get_content(), 'html.parser')
-    images_in_chapter = soup.find_all('img')
+def extract_and_mark_images(html_content, item_name, image_map, output_dir, img_counter):
+    """
+    Finds all images in the HTML content, safely downloads them if they exist in the 
+    image map, and replaces the <img> tag with a special markdown placeholder.
+    Returns the modified HTML string and the updated image counter.
+    """
+    if not image_map or not output_dir:
+        return html_content, img_counter
 
-    for img_tag in images_in_chapter:
+    soup = BeautifulSoup(html_content, 'html.parser')
+    images = soup.find_all('img')
+    
+    modified = False
+    for img_tag in images:
         src = img_tag.get('src')
-        if src:
-            decoded_src = unquote(src)
-            chapter_path = os.path.dirname(chapter_item.get_name())
-            cleaned_src = os.path.normpath(os.path.join(chapter_path, decoded_src))
-            cleaned_src = cleaned_src.lstrip('/')
-            if cleaned_src in image_map:
-                chapter_image_counts[chapter_identifier] = chapter_image_counts.get(chapter_identifier, 0) + 1
-                image_count_for_chapter = chapter_image_counts[chapter_identifier]
-                ext = cleaned_src.split('.')[-1]
-                image_filename = f"{chapter_identifier}_image_{image_count_for_chapter}.{ext}"
-                image_path = os.path.join(output_dir, image_filename)
+        if not src:
+            continue
+            
+        decoded_src = unquote(src)
+        chapter_path = os.path.dirname(item_name)
+        cleaned_src = os.path.normpath(os.path.join(chapter_path, decoded_src)).lstrip('/')
+        
+        if cleaned_src in image_map:
+            img_counter += 1
+            ext = cleaned_src.split('.')[-1]
+            image_filename = f"image_{img_counter}.{ext}"
+            image_path = os.path.join(output_dir, image_filename)
+            
+            try:
+                with open(image_path, 'wb') as img_file:
+                    img_file.write(image_map[cleaned_src])
+                
+                alt_text = img_tag.get('alt', '')
+                # Insert special marker
+                marker = f"\n<<@IMAGE:{image_filename}|{alt_text}>>\n"
+                img_tag.replace_with(marker)
+                modified = True
+            except Exception as e:
+                print(f"Error extracting image {cleaned_src}: {e}")
+                
+    if modified:
+        return str(soup), img_counter
+    return html_content, img_counter
 
-                try:
-                    with open(image_path, 'wb') as img_file:
-                        img_file.write(image_map[cleaned_src])
-                    print(f"Extracted image: {image_filename} from {chapter_item.get_name()}")
-                    image_context.append({
-                        "image_path": image_path,
-                        "context_text": img_tag.get('alt', '')
-                    })
-                except Exception as e:
-                    print(f"Error extracting image {cleaned_src} from {chapter_item.get_name()}: {e}")
-    return image_context
+def parse_markdown_images_from_text(text):
+    """
+    Finds <<@IMAGE:file|alt>> tags in text, converts them to markdown image links list,
+    and returns the cleaned text along with the list of markdown links.
+    """
+    images = []
+    image_matches = re.finditer(r'<<@IMAGE:(.*?)\|(.*?)>>', text)
+    for m in image_matches:
+        filename, alt = m.group(1), m.group(2)
+        images.append(f"![{alt}]({filename})")
+    
+    clean_text = re.sub(r'<<@IMAGE:(.*?)>>', '', text).strip()
+    return clean_text, images
 
 def extract_images(epub_path):
     epub_path = os.path.abspath(epub_path)
@@ -65,7 +90,7 @@ def extract_images(epub_path):
 
     book = epub.read_epub(epub_path)
 
-    book_folder_name = get_book_output_folder(book, default_name="extracted_images")
+    book_folder_name = utils.get_book_output_folder(book, default_name="extracted_images")
     output_base_dir = os.path.join(os.path.dirname(epub_path), book_folder_name)
     os.makedirs(output_base_dir, exist_ok=True)
     print(f"Images will be saved in: {output_base_dir}")
@@ -76,7 +101,10 @@ def extract_images(epub_path):
     chapter_image_counts = {}
     for item in book.get_items():
         if item.get_type() == ebooklib.ITEM_DOCUMENT:
-            extract_chapter_images_and_context(item, image_map, output_base_dir, chapter_image_counts)
+            # Note: extract_images standalone script is mostly legacy since image extraction
+            # is now tightly integrated into utils.merge_and_split_chapters
+            html_content = item.get_content().decode('utf-8', errors='ignore')
+            extract_and_mark_images(html_content, item.get_name(), image_map, output_base_dir, 0)
 
     print(f"Image extraction complete.")
 

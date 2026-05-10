@@ -367,8 +367,7 @@ def create_gemini_chapter_summary_prompt(text: str) -> str:
 def create_gemini_full_summary_prompt(text: str) -> str:
     """Returns the final synthesis prompt combining multiple chapter summaries."""
     return f"""## Role & Goal
-    You are an expert analyst and synthesizer of non-fiction book. Your input is a series of my chapter summaries. Your goal is to synthesize these into a definitive, high-level analysis that captures the book's core framework, practical applications, and overall intellectual contribution. The final output should be a strategic document for a busy leader who needs to grasp the essence of the book quickly.
-    ## Output Structure
+    You are a Master Information Architect. Your goal is to transform long-form chapter summaries into a Single-Page Schematic Framework. Prioritize high-density information, tabular comparisons, and "Practical Cues" over narrative analysis. Eliminate all conversational filler and introductory meta-talk.
 
     ### 1. Executive Summary
     Begin with a single, concise paragraph that captures the book's central purpose, main argument, and overall conclusion. This should serve as a high-level introduction that answers "What is this book about and why is it important?"

@@ -162,7 +162,7 @@ def _process_spine_items(book, exclude_keywords, image_map, output_dir):
             continue
 
         content = item.get_content().decode("utf-8", errors="ignore")
-        if is_non_chapter_content(content):
+        if len(content) < 10000 and is_non_chapter_content(content):
             continue
 
         new_id = get_chapter_identifier(name, content)

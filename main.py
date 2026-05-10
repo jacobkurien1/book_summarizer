@@ -139,7 +139,7 @@ def main(
             "cover", "titlepage", "title_page", "dedication", "nav",
             "introduction", "acknowledgments", "about_the_author", "ba1",
             "copyright", "credits", "publisher", "preface", "foreword",
-            "epilogue", "appendix", "index", "glossary", "bibliography",
+            "epilogue", "appendix", "glossary", "bibliography",
             "frontmatter", "footnote", "footnotes", "contents", "toc",
             "notes", "bm",
         ]

@@ -576,3 +576,56 @@ This is the legitimate start of Chapter 2.
         
         self.assertEqual(active_chapters[1]["name"], "Chapter 2")
         self.assertIn("legitimate start of Chapter 2", active_chapters[1]["content"])
+
+    def test_monolithic_file_extraction(self):
+        """Verifies that large monolithic files are not skipped due to front-matter keywords."""
+        class MockItem:
+            def __init__(self, name, content, item_id):
+                self.name = name
+                self.content = content
+                self.item_id = item_id
+
+            def get_type(self):
+                import ebooklib
+                return ebooklib.ITEM_DOCUMENT
+
+            def get_name(self):
+                return self.name
+
+            def get_content(self):
+                return self.content.encode("utf-8")
+
+            def get_id(self):
+                return self.item_id
+
+        # Create a large content block that starts with a keyword like 'copyright'
+        padding = " padding" * 2000  # Make it larger than 10000 chars
+        content = f"<html><body>copyright notice at the top<br/>{padding}<br/>Chapter 1<br/>Chapter 1 Content<br/>Chapter 2<br/>Chapter 2 Content</body></html>"
+        
+        mock_items = [
+            MockItem("index_split_000.html", content, "id115"),
+        ]
+
+        class MockBook:
+            def get_items(self):
+                return mock_items
+
+            @property
+            def spine(self):
+                return [("id115", "yes")]
+
+        mock_book = MockBook()
+        # "index" is removed from exclude_keywords in main.py, but we test that the content check doesn't skip it.
+        exclude_keywords = []
+
+        chapters = utils.merge_and_split_chapters(mock_book, exclude_keywords)
+        active_chapters = [c for c in chapters if c["name"] != "Introduction" or c["content"].strip()]
+        
+        # We expect 3 chapters (Introduction, Chapter 1, Chapter 2). 
+        # Before the fix, the entire file would be skipped because of 'copyright' at the top.
+        self.assertEqual(len(active_chapters), 3, f"Expected 3 chapters, got {len(active_chapters)}")
+        self.assertEqual(active_chapters[0]["name"], "Introduction")
+        self.assertEqual(active_chapters[1]["name"], "Chapter 1")
+        self.assertIn("Chapter 1 Content", active_chapters[1]["content"])
+        self.assertEqual(active_chapters[2]["name"], "Chapter 2")
+        self.assertIn("Chapter 2 Content", active_chapters[2]["content"])

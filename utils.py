@@ -249,6 +249,45 @@ def _split_text_into_chapters(full_text):
 
     # Return chapters in the order they first appeared
     final_chapters = []
+    # If we found any chapters (or just an Introduction), let's see if the very last 
+    # section contains back-matter that needs to be surgically removed.
+    if order or 0 in chapters_map:
+        last_logical_num = order[-1] if order else 0
+        last_chap = chapters_map[last_logical_num]
+        
+        # We only look for back-matter in the final section of the book to be resilient
+        # against 'Notes' subsections appearing inside earlier chapters.
+        backmatter_keywords = [
+            "notes", "index", "bibliography", "acknowledgments", "epilogue",
+            "conclusion", "afterword", "about the author", "author bio",
+            "illustration credits", "credits"
+        ]
+        backmatter_pattern = re.compile(rf"(?im)^\s*({'|'.join(backmatter_keywords)})\s*$")
+        bm_splits = backmatter_pattern.split(last_chap["content"])
+        
+        if len(bm_splits) > 1:
+            # We found back-matter at the end! 
+            # Re-assign the first part back to the last chapter
+            first_part_content, first_part_images = parse_markdown_images_from_text(bm_splits[0].strip())
+            last_chap["content"] = first_part_content
+            last_chap["images"] = first_part_images
+            
+            # Create new sections for the back-matter fragments
+            bm_counter = 900
+            for j in range(1, len(bm_splits), 2):
+                bm_name = bm_splits[j].strip().capitalize()
+                bm_content = bm_splits[j+1].strip()
+                bm_content_clean, bm_images = parse_markdown_images_from_text(bm_content)
+                
+                chapters_map[bm_counter] = {
+                    "name": bm_name,
+                    "content": bm_content_clean,
+                    "logical_num": bm_counter,
+                    "images": bm_images
+                }
+                order.append(bm_counter)
+                bm_counter += 1
+
     for num in order:
         chap = chapters_map[num]
         if chap["content"].strip() or chap["images"] or chap["logical_num"] == 0:

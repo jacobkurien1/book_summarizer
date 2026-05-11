@@ -163,6 +163,16 @@ def main(
                 print(f"Skipping almost empty chapter: {chapter_name}")
                 continue
 
+            # Skip back-matter chapters that we want to ignore
+            exclude_sections = [
+                "notes", "bibliography", "index", "acknowledgments", "credits",
+                "epilogue", "conclusion", "afterword", "about the author", 
+                "author bio", "illustration credits"
+            ]
+            if chapter_name.lower() in exclude_sections:
+                print(f"Skipping excluded section: {chapter_name}")
+                continue
+
             print(f"Summarizing: {chapter_name}")
 
             summary = summarize_text(

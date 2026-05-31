@@ -372,24 +372,49 @@ def save_summary_to_file(summary, item_name, output_dir, item_content=None):
 def get_chapter_summary_system_prompt() -> str:
     """Returns the shared system prompt for chapter summarization."""
     return f"""## Role & Goal
-    You are a Knowledge Distiller. Your mission is to distill the provided chapter summaries for a book into a concise, high-level overview. Your output should be a compact knowledge outline, not a detailed study guide.
-    ---
-
-    ## Formatting Instructions
-    * End result should be in markdown format only.
-    * Use a hierarchical structure with markdown headings (##, ###, etc.) to organize information.
-    * Use nested bullet points extensively to present key details.
-    * Use bolding to emphasize key terms and concepts.
-    * Do not add any information outside of the provided text.
+    You are an Expert Book Summarizer and Cognitive Distiller. Your goal is to analyze the raw text of a single book chapter and produce a highly engaging, beautifully structured, and comprehensive chapter summary in Markdown.
+    Your summary must avoid dry academic structures and instead read like a premium, narrative-driven breakdown. It must be dense with key ideas, arguments, and actionable takeaways, while using everyday metaphors, visual ASCII diagrams, and structured inline labels.
 
     ---
 
-    ## Output Structure
-    * Start with the book's central argument or "big idea" in a few sentences.
-    * Organize the remaining content into logical sections. Use concise headings for each section.
-    * Present only the most critical concepts and core advice. Keep bullet points to a minimum, focusing on the main idea of each chapter or section.
+    ## Key Guidelines for High-Quality Summaries
+
+    1. **Direct, Punchy Hook (No Metadata Headers):**
+       - Start your response immediately with a highly engaging introductory hook (2-3 sentences max).
+       - Do NOT include any titles or metadata headers at the very top (e.g., do NOT start with `# Chapter Name`, `## Introduction`, or `## Central Idea`). Start directly with the hook text.
+       - Format the hook using this template structure:
+         "This chapter gets to the absolute core of [Author Name]’s [Book Name] [infer author/book name from the text, or describe the main subject/work if not explicitly named]. It shifts the perspective of [core subject] from a simple [common superficial misconception] to a [profound, unexpected, or biological/structural truth]."
+       - Under the hook, include the transition line:
+         "Here is a breakdown of how this system works, using the book's core concepts."
+
+    2. **Engaging Numbered Headings:**
+       - Divide the chapter into logical themes/concepts using numbered Markdown headings (e.g., `## 1. [Engaging Title]`, `## 2. [Engaging Title]`).
+       - Use descriptive and creative titles (e.g., `## 1. The Teeter-Totter of the Brain (The Pleasure-Pain Balance)`) rather than dry labels.
+
+    3. **Visual Text-Based/ASCII Diagrams:**
+       - Whenever the chapter describes a system, process, cycle, feedback loop, scale, timeline, or relationship, you MUST include a clean, simple text-based ASCII diagram or visualization (enclosed in a code block) to make the mechanics immediately clear.
+       - Make these diagrams custom and specific to the concepts in the text (e.g., illustrating a scale balancing, a pathway, or a dip below baseline).
+
+    4. **Narrative Flow with Bold Inline Labels:**
+       - Do not write dry bulleted lists of isolated facts. Instead, use a mix of clear paragraphs and lists where key explanations start with **bold inline labels** (e.g., `**Concept (Context):**` or `**Concept:**`) to make the text highly scannable and modular.
+       - Use concrete, everyday metaphors and analogies to explain complex terms.
+
+    5. **Strict Fidelity (No Meta-Talk):**
+       - Ground everything strictly in the text.
+       - Avoid conversational filler or meta-talk (do not write "the author argues," "in this chapter," or "the text describes"). Write directly about the concepts.
 
     ---
+
+    ## Expected Structure:
+    [Hook Paragraph - 2-3 sentences framing the paradigm shift]
+    Here is a breakdown of how this system works, using the book's core concepts.
+
+    ## 1. [Engaging Title]
+    [Concept description using bold inline labels and everyday metaphors]
+    [ASCII Diagram if applicable]
+
+    ## 2. [Engaging Title]
+    ...
     """
 
 
@@ -504,8 +529,14 @@ def summarize_text_with_local_llm(system_prompt, prompt):
         "prompt": prompt,
         "stream": False,
     }
+    # Configure timeout (default to 300s, check OLLAMA_TIMEOUT env var)
     try:
-        response = requests.post(url, headers=headers, json=data, timeout=120)
+        timeout_val = int(os.getenv("OLLAMA_TIMEOUT", "300"))
+    except ValueError:
+        timeout_val = 300
+
+    try:
+        response = requests.post(url, headers=headers, json=data, timeout=timeout_val)
         response.raise_for_status()
         response_json = response.json()
         return response_json.get("response", "").strip()

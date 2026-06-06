@@ -81,12 +81,54 @@ def get_chapter_identifier(chapter_name_raw, item_content=None):
     }
 
     for key, value in name_to_identifier_map.items():
-        if key in simplified_name:
+        # Skip 'index' substring match for Calibre-style 'index_split_XXX' filenames
+        if key == "index" and "index_split" in simplified_name:
+            continue
+        # Use word-boundary match, but also allow key as a prefix
+        # (e.g. 'frontmatter' matches 'frontmatter01').
+        if re.search(rf"\b{re.escape(key)}", simplified_name):
             return value
 
-    # NEW: Content fallback
-    if item_content:
-        # Pass only content to extract logical number
+    # Content fallback: check heading/first-line for back/front matter before
+    # trying to extract a chapter number from the body text.
+    # Only apply back/front-matter heading check for small files; large files
+    # are monolithic EPUBs that may start with a copyright/notes blurb but
+    # actually contain multiple chapters inside and must not be discarded.
+    if item_content and len(item_content) < 10000:
+        try:
+            from bs4 import BeautifulSoup as _BS
+            _soup = _BS(item_content, "html.parser")
+            _heading_text = ""
+            for _tag in ["h1", "h2", "h3", "h4", "h5", "h6"]:
+                _h = _soup.find(_tag)
+                if _h and _h.get_text(strip=True):
+                    _heading_text = _h.get_text(strip=True).lower()
+                    break
+            if not _heading_text:
+                _lines = [l.strip() for l in _soup.get_text(separator="\n").splitlines() if l.strip()]
+                if _lines:
+                    _heading_text = _lines[0].lower()
+            _heading_to_id = {
+                "searchable terms": "index",
+                "index": "index",
+                "bibliography": "bibliography",
+                "notes": "notes",
+                "acknowledgments": "acknowledgments",
+                "about the author": "about_the_author",
+                "author bio": "about_the_author",
+            }
+            for _key, _val in _heading_to_id.items():
+                if _key in _heading_text:
+                    return _val
+        except Exception:
+            pass
+
+    # Chapter number extraction:
+    # We can extract chapter numbers for files of any size, because chapter classifications
+    # are never skipped. However, we avoid extracting chapter numbers if the content is identified
+    # as front/back matter (non-chapter content) to prevent monolithic files starting with
+    # copyright blurbs from being misclassified.
+    if item_content and not is_non_chapter_content(item_content):
         num = get_logical_chapter_number(item_content)
         if num is not None:
             return f"chapter_{num}"
@@ -105,40 +147,96 @@ def get_chapter_identifier(chapter_name_raw, item_content=None):
 
 
 def get_logical_chapter_number(text):
-    """Extracts a logical number from chapter text or titles."""
+    """Extracts a logical chapter number from chapter text or titles.
+
+    When `text` is raw HTML (e.g. from an EPUB item), the HTML is stripped
+    first using BeautifulSoup so that digits inside XML declarations, namespace
+    URLs, or href attributes do not produce false positives.
+
+    A number is accepted only if it:
+      - Appears at the very start of a heading or one of the first body lines,
+        optionally preceded by 'Chapter / Part / C', OR
+      - Is explicitly preceded by 'Chapter / Part / C' anywhere in those lines.
+
+    This prevents mid-sentence words like "one of the best" or years like
+    "2004" from being mistaken for chapter numbers.
+    """
     word_to_num = {
-        "one": 1,
-        "two": 2,
-        "three": 3,
-        "four": 4,
-        "five": 5,
-        "six": 6,
-        "seven": 7,
-        "eight": 8,
-        "nine": 9,
-        "ten": 10,
-        "eleven": 11,
-        "twelve": 12,
-        "thirteen": 13,
-        "fourteen": 14,
-        "fifteen": 15,
-        "sixteen": 16,
-        "seventeen": 17,
-        "eighteen": 18,
-        "nineteen": 19,
-        "twenty": 20,
+        "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
+        "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
+        "eleven": 11, "twelve": 12, "thirteen": 13, "fourteen": 14,
+        "fifteen": 15, "sixteen": 16, "seventeen": 17, "eighteen": 18,
+        "nineteen": 19, "twenty": 20,
     }
+    _word_alts = "|".join(word_to_num.keys())
 
-    # Try digit first
-    digit_match = re.search(r"\b(\d+)\b", text)
-    if digit_match:
-        return int(digit_match.group(1))
+    # Strip HTML to get clean visible text, preserving line/word boundaries.
+    if "</" in text or "<html" in text or "<body" in text:
+        try:
+            from bs4 import BeautifulSoup as _BS
+            _soup = _BS(text, "html.parser")
+            headings = [
+                h.get_text(separator=" ", strip=True)
+                for tag in ["h1", "h2", "h3", "h4", "h5", "h6"]
+                for h in _soup.find_all(tag)
+            ]
+            paragraphs = _soup.find_all(["p", "div", "li"])
+            if paragraphs:
+                body_lines = []
+                for p in paragraphs:
+                    txt = p.get_text(separator=" ", strip=True)
+                    if txt:
+                        body_lines.append(txt)
+            else:
+                body_lines = [
+                    l.strip()
+                    for l in _soup.get_text(separator="\n").splitlines()
+                    if l.strip()
+                ]
+            search_items = headings + body_lines[:3]
+        except Exception:
+            search_items = [text]
+    else:
+        search_items = [text]
 
-    # Try word
-    lower_text = text.lower()
-    for word, num in word_to_num.items():
-        if word in lower_text:
-            return num
+    # Pattern A: line/heading starts with an optional chapter indicator then
+    # a digit or spelled-out number (≤ 100 for digits).
+    pat_start = re.compile(
+        rf"^\s*(?:chapter|part|c)?\s*"
+        rf"(\d+|{_word_alts})\b",
+        re.IGNORECASE,
+    )
+    # Pattern B: explicit chapter/part indicator ANYWHERE in the line.
+    pat_explicit = re.compile(
+        rf"\b(?:chapter|part|c)[_\- ]?\s*"
+        rf"(\d+|{_word_alts})\b",
+        re.IGNORECASE,
+    )
+
+    for item in search_items:
+        # Skip endnote/footnote citation lines
+        if re.match(r"^\s*\d+\.\s+", item):
+            item_lower = item.lower()
+            if (
+                "ibid" in item_lower
+                or "see" in item_lower
+                or "http" in item_lower
+                or "www" in item_lower
+                or ("," in item and ('"' in item or '“' in item or '”' in item))
+                or item.count(",") >= 2
+            ):
+                continue
+
+        for pat in (pat_start, pat_explicit):
+            m = pat.match(item) if pat is pat_start else pat.search(item)
+            if m:
+                val = m.group(1).lower()
+                if val.isdigit():
+                    n = int(val)
+                    if n <= 100:
+                        return n
+                elif val in word_to_num:
+                    return word_to_num[val]
 
     return None
 
@@ -334,7 +432,7 @@ def is_non_chapter_content(content: str) -> bool:
     # Check for keywords in the first 1024 characters of the visible text
     content_lower = text_content[:1024].lower()
     for keyword in non_chapter_keywords:
-        if keyword in content_lower:
+        if re.search(rf"\b{re.escape(keyword)}\b", content_lower):
             return True
 
     return False
@@ -393,7 +491,7 @@ def get_chapter_summary_system_prompt() -> str:
 
     3. **Visual Text-Based/ASCII Diagrams:**
        - Whenever the chapter describes a system, process, cycle, feedback loop, scale, timeline, or relationship, you MUST include a clean, simple text-based ASCII diagram or visualization (enclosed in a code block) to make the mechanics immediately clear.
-       - Make these diagrams custom and specific to the concepts in the text (e.g., illustrating a scale balancing, a pathway, or a dip below baseline).
+       - Make these diagrams custom and specific to the concepts in the text (e.g., illustrating a scale balancing, a pathway, or a dip below baseline). Think of this as the mindmap that helps the readers understand the relation between the various concepts.
 
     4. **Narrative Flow with Bold Inline Labels:**
        - Do not write dry bulleted lists of isolated facts. Instead, use a mix of clear paragraphs and lists where key explanations start with **bold inline labels** (e.g., `**Concept (Context):**` or `**Concept:**`) to make the text highly scannable and modular.

@@ -629,3 +629,242 @@ This is the legitimate start of Chapter 2.
         self.assertIn("Chapter 1 Content", active_chapters[1]["content"])
         self.assertEqual(active_chapters[2]["name"], "Chapter 2")
         self.assertIn("Chapter 2 Content", active_chapters[2]["content"])
+
+
+class TestCalibreSplitFilesHandling(unittest.TestCase):
+    """
+    Regression tests for EPUBs produced by Calibre that use 'index_split_XXX.html'
+    filenames.  These files contain 'index' in the name but are NOT back-matter.
+    The two bugs being guarded against:
+
+      1. get_chapter_identifier() maps 'index_split_005.html' -> 'index' because
+         'index' is a substring of the filename, causing those items to be skipped
+         entirely during spine processing.
+
+      2. get_logical_chapter_number() runs directly on raw HTML, matching the '1'
+         inside 'xml version="1.0"' or href attributes, so every document becomes
+         'chapter_1' and they are all merged into one giant undivided section.
+    """
+
+    # ------------------------------------------------------------------ helpers
+
+    # Raw HTML that mirrors a real Calibre-produced chapter file.
+    # The '1' in the XML declaration and namespace URL must NOT be used as the
+    # chapter number.  The real chapter number lives in the first visible line
+    # of body text: "1 It Takes More Than Performance".
+    CHAPTER_1_HTML = (
+        "<?xml version='1.0' encoding='utf-8'?>"
+        "<!DOCTYPE html>"
+        '<html xmlns="http://www.w3.org/1999/xhtml">'
+        "<head/><body>"
+        '<p id="filepos40506"><span>1</span></p>'
+        "<p>It Takes More Than Performance</p>"
+        "<p>IN 2004, the Miami-Dade County school board hired Rudy Crew.</p>"
+        "</body></html>"
+    )
+
+    CHAPTER_2_HTML = (
+        "<?xml version='1.0' encoding='utf-8'?>"
+        "<!DOCTYPE html>"
+        '<html xmlns="http://www.w3.org/1999/xhtml">'
+        "<head/><body>"
+        '<p id="filepos50000"><span>2</span></p>'
+        "<p>The Personal Qualities That Bring Influence</p>"
+        "<p>RON MEYER, the president and COO of Universal Studios, is a powerful figure.</p>"
+        "</body></html>"
+    )
+
+    SEARCHABLE_TERMS_HTML = (
+        "<?xml version='1.0' encoding='utf-8'?>"
+        "<!DOCTYPE html>"
+        '<html xmlns="http://www.w3.org/1999/xhtml">'
+        "<head/><body>"
+        "<p>SEARCHABLE TERMS</p>"
+        "<p>The pagination of this electronic edition does not match the print edition.</p>"
+        "</body></html>"
+    )
+
+    TITLE_PAGE_HTML = (
+        "<?xml version='1.0' encoding='utf-8'?>"
+        "<!DOCTYPE html>"
+        '<html xmlns="http://www.w3.org/1999/xhtml">'
+        "<head/><body>"
+        "<p>Power</p>"
+        "<p>Why Some People Have It—and Others Don't</p>"
+        "<p>Jeffrey Pfeffer</p>"
+        "</body></html>"
+    )
+
+    # ------------------------------------------------------------------ tests
+
+    def test_index_split_not_mapped_to_index_identifier(self):
+        """
+        'index_split_XXX.html' filenames must NOT be mapped to the 'index'
+        identifier just because the string 'index' appears in the name.
+        Bug: the old code did `if key in simplified_name` which matched.
+        """
+        # Without content hint, the fallback cleans the name
+        result = utils.get_chapter_identifier("index_split_005.html")
+        self.assertNotEqual(
+            result,
+            "index",
+            "index_split_005.html must not be classified as back-matter 'index'.",
+        )
+
+    def test_chapter_identifier_reads_number_from_html_not_xml_declaration(self):
+        """
+        When content is provided, get_chapter_identifier must strip the HTML
+        and find the visible chapter number, not the '1' in xml version="1.0".
+        Bug: the old code ran regex on raw HTML and always returned chapter_1.
+        """
+        result = utils.get_chapter_identifier("index_split_005.html", self.CHAPTER_1_HTML)
+        self.assertEqual(
+            result,
+            "chapter_1",
+            "index_split_005.html with Chapter 1 content should yield 'chapter_1'.",
+        )
+
+        result2 = utils.get_chapter_identifier("index_split_006.html", self.CHAPTER_2_HTML)
+        self.assertEqual(
+            result2,
+            "chapter_2",
+            "index_split_006.html with Chapter 2 content should yield 'chapter_2'.",
+        )
+
+    def test_searchable_terms_identified_as_index(self):
+        """
+        A file starting with 'SEARCHABLE TERMS' should be identified as back-matter
+        index, not as a chapter.
+        """
+        result = utils.get_chapter_identifier(
+            "index_split_019.html", self.SEARCHABLE_TERMS_HTML
+        )
+        self.assertEqual(
+            result,
+            "index",
+            "A 'SEARCHABLE TERMS' page must be classified as 'index' back-matter.",
+        )
+
+    def test_get_logical_chapter_number_ignores_xml_declaration(self):
+        """
+        get_logical_chapter_number must NOT match the '1' inside the XML
+        declaration or XHTML namespace URL when raw HTML is passed.
+        It should return the visible chapter number from the body text.
+        """
+        # Chapter 2 HTML — the very first digit in raw text is '1' (xml version)
+        # but the visible first line is '2'.
+        result = utils.get_logical_chapter_number(self.CHAPTER_2_HTML)
+        self.assertEqual(
+            result,
+            2,
+            "get_logical_chapter_number must return 2 for Chapter 2 HTML, "
+            "not 1 from the XML declaration.",
+        )
+
+    def test_calibre_spine_produces_correct_chapters(self):
+        """
+        End-to-end: a mock book with Calibre-style 'index_split_XXX.html'
+        files must be split into individual chapters, not collapsed into one.
+        """
+
+        class MockItem:
+            def __init__(self, name, content, item_id):
+                self.name = name
+                self.content = content
+                self.item_id = item_id
+
+            def get_type(self):
+                import ebooklib
+                return ebooklib.ITEM_DOCUMENT
+
+            def get_name(self):
+                return self.name
+
+            def get_content(self):
+                return self.content.encode("utf-8")
+
+            def get_id(self):
+                return self.item_id
+
+        mock_items = [
+            MockItem("titlepage.xhtml",     self.TITLE_PAGE_HTML,       "tp"),
+            MockItem("index_split_005.html", self.CHAPTER_1_HTML,        "s5"),
+            MockItem("index_split_006.html", self.CHAPTER_2_HTML,        "s6"),
+            MockItem("index_split_019.html", self.SEARCHABLE_TERMS_HTML, "s19"),
+        ]
+
+        class MockBook:
+            def get_items(self):
+                return mock_items
+
+            @property
+            def spine(self):
+                return [("tp", "yes"), ("s5", "yes"), ("s6", "yes"), ("s19", "yes")]
+
+        mock_book = MockBook()
+        chapters = utils.merge_and_split_chapters(mock_book, exclude_keywords=[])
+        active = [c for c in chapters if c["content"].strip()]
+
+        names = [c["name"] for c in active]
+        self.assertIn(
+            "Chapter 1",
+            names,
+            f"Expected 'Chapter 1' in chapters, got: {names}",
+        )
+        self.assertIn(
+            "Chapter 2",
+            names,
+            f"Expected 'Chapter 2' in chapters, got: {names}",
+        )
+        # Must produce at least 2 distinct chapters, not a single merged blob
+        chapter_entries = [c for c in active if c["name"].startswith("Chapter")]
+        self.assertGreaterEqual(
+            len(chapter_entries),
+            2,
+            f"Expected at least 2 chapters from Calibre split files, got: {names}",
+        )
+
+    def test_endnote_line_not_treated_as_chapter(self):
+        """
+        A line like '6. Patricia Robinson and Norihiko...' (endnote citation)
+        must NOT be treated as chapter_6.
+        Endnotes have pattern: digit + period + space + author text.
+        """
+        result = utils.get_logical_chapter_number(
+            "6. Patricia Robinson and Norihiko Shimizu, \"Japanese Corporate Restructuring\""
+        )
+        self.assertIsNone(result, "Endnote citation '6. Author...' must not yield chapter 6")
+
+    def test_endnote_ibid_not_treated_as_chapter(self):
+        result = utils.get_logical_chapter_number("12. Ibid., 35.")
+        self.assertIsNone(result, "Endnote 'N. Ibid.' must not yield a chapter number")
+
+    def test_standalone_number_is_chapter(self):
+        """A line that is just a number IS a valid chapter identifier."""
+        result = utils.get_logical_chapter_number("6")
+        self.assertEqual(result, 6)
+
+    def test_number_then_title_is_chapter(self):
+        """'6\nIt Takes More Than Performance' — number on its own line before title."""
+        result = utils.get_logical_chapter_number("6\nIt Takes More Than Performance")
+        self.assertEqual(result, 6)
+
+    def test_endnote_spine_items_not_counted_as_chapters(self):
+        """
+        Tiny endnote files (starting with 'N. Author...') must not become chapter_N.
+        get_chapter_identifier must return a non-chapter identifier for them.
+        """
+        ENDNOTE_HTML = (
+            "<?xml version='1.0' encoding='utf-8'?>"
+            '<html xmlns="http://www.w3.org/1999/xhtml"><head/><body>'
+            '<p>6. Patricia Robinson and Norihiko Shimizu, '
+            '"Japanese Corporate Restructuring: Capital-Market Pressures '
+            'and the Transform..."</p>'
+            '</body></html>'
+        )
+        result = utils.get_chapter_identifier("index_split_232.html", ENDNOTE_HTML)
+        self.assertFalse(
+            str(result).startswith("chapter_"),
+            f"Endnote file should not be classified as '{result}'"
+        )
+

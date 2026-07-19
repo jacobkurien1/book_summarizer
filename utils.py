@@ -48,7 +48,11 @@ def get_chapter_identifier(chapter_name_raw, item_content=None):
     # More flexible chapter number extraction
     match = re.search(r"(?:chapter|c|part)[_-]?(\d+)", simplified_name)
     if match:
-        return f"chapter_{int(match.group(1))}"
+        base_id = f"chapter_{int(match.group(1))}"
+        part_match = re.search(r"part[_-]?(\d+)", chapter_name_raw.lower())
+        if part_match:
+            return f"{base_id}_part_{int(part_match.group(1))}"
+        return base_id
 
     # Handle Appendix
     if "appendix" in simplified_name:
@@ -284,6 +288,64 @@ def _process_spine_items(book, exclude_keywords, image_map, output_dir):
         
     return full_text
 
+def ocr_normalize(s):
+    """Standardize string for matching, resilient to common OCR confusions."""
+    s = s.lower()
+    s = re.sub(r'\W+', '', s)
+    s = s.replace('cl', 'cl').replace('ci', 'cl').replace('cy', 'cl').replace('1', 'l').replace('i', 'l').replace('y', 'l')
+    return s
+
+def fuzzy_match(title, text):
+    """Fuzzy matching to compare TOC titles with text paragraphs resiliently."""
+    title_clean = ocr_normalize(title)
+    text_clean = ocr_normalize(text)
+    if not title_clean:
+        return False
+    if len(title_clean) < 8:
+        return title_clean == text_clean
+    if title_clean in text_clean and len(text_clean) < len(title_clean) + 35:
+        return True
+    return False
+
+def extract_toc_titles(lines, max_search=200):
+    """Scans the beginning lines to find a Table of Contents. Returns list of (line_idx, title)."""
+    toc_pattern = re.compile(r"^(.*?)\s+(?:\.|\s)*\s*(\d+)$")
+    consecutive_matches = []
+    for idx, line in enumerate(lines[:max_search]):
+        match = toc_pattern.match(line)
+        if match:
+            title = match.group(1).strip()
+            title = re.sub(r"\.+$", "", title).strip()
+            consecutive_matches.append((idx, title))
+        else:
+            if len(consecutive_matches) >= 4:
+                break
+            if idx - (consecutive_matches[0][0] if consecutive_matches else idx) > 5:
+                consecutive_matches = []
+                
+    if len(consecutive_matches) >= 4:
+        return consecutive_matches
+    return []
+
+def chunk_text(text, max_chars=25000):
+    """Split text into smaller chunks at paragraph boundaries (newline)."""
+    paragraphs = text.split('\n')
+    chunks = []
+    current_chunk = []
+    current_len = 0
+    for p in paragraphs:
+        p_len = len(p) + 1
+        if current_len + p_len > max_chars and current_chunk:
+            chunks.append("\n".join(current_chunk))
+            current_chunk = [p]
+            current_len = p_len
+        else:
+            current_chunk.append(p)
+            current_len += p_len
+    if current_chunk:
+        chunks.append("\n".join(current_chunk))
+    return chunks
+
 def _split_text_into_chapters(full_text):
     """Splits unified text into chapters and extracts markdown image links."""
     # Mandatory keyword (chapter|c|part) to prevent page numbers from starting chapters.
@@ -293,105 +355,167 @@ def _split_text_into_chapters(full_text):
     )
     splits = pattern.split(full_text)
     
+    use_fallback = False
     if len(splits) <= 1:
-        full_text_clean, images = parse_markdown_images_from_text(full_text)
-        return [{"name": "Full Book Content", "content": full_text_clean, "logical_num": 1, "images": images}]
-
-    # We use a dict to merge fragments of the same chapter together globally
-    chapters_map = {}
-    # Track order of first appearance
-    order = []
-
-    # Handle text before the first marker (Introduction)
-    if splits[0].strip():
-        intro_content, intro_images = parse_markdown_images_from_text(splits[0].strip())
-        chapters_map[0] = {
-            "name": "Introduction",
-            "content": intro_content,
-            "logical_num": 0,
-            "images": intro_images
-        }
-        order.append(0)
-
-    for i in range(1, len(splits), 4):
-        chap_type = splits[i]
-        chap_num_str = splits[i + 1]
-        marker_num = splits[i + 2]
-        chap_content = splits[i + 3].strip()
-
-        if marker_num:
-            logical_num = int(marker_num)
-            name = f"Chapter {logical_num}"
-        else:
-            logical_num = get_logical_chapter_number(chap_num_str)
-            name_prefix = chap_type.capitalize() if chap_type else "Chapter"
-            name = f"{name_prefix} {chap_num_str.capitalize()}"
-
-        chap_content_clean, chap_images = parse_markdown_images_from_text(chap_content)
-
-        if logical_num in chapters_map:
-            chapters_map[logical_num]["images"].extend(chap_images)
-            if chap_content_clean:
-                if chapters_map[logical_num]["content"]:
-                    chapters_map[logical_num]["content"] += "\n\n" + chap_content_clean
-                else:
-                    chapters_map[logical_num]["content"] = chap_content_clean
-        else:
-            chapters_map[logical_num] = {
-                "name": name,
-                "content": chap_content_clean,
-                "logical_num": logical_num,
-                "images": chap_images,
-            }
-            order.append(logical_num)
-
-    # Return chapters in the order they first appeared
+        use_fallback = True
+        
     final_chapters = []
-    # If we found any chapters (or just an Introduction), let's see if the very last 
-    # section contains back-matter that needs to be surgically removed.
-    if order or 0 in chapters_map:
-        last_logical_num = order[-1] if order else 0
-        last_chap = chapters_map[last_logical_num]
-        
-        # We only look for back-matter in the final section of the book to be resilient
-        # against 'Notes' subsections appearing inside earlier chapters.
-        backmatter_keywords = [
-            "notes", "index", "bibliography", "acknowledgments", "epilogue",
-            "conclusion", "afterword", "about the author", "author bio",
-            "illustration credits", "credits"
-        ]
-        backmatter_pattern = re.compile(rf"(?im)^\s*({'|'.join(backmatter_keywords)})\s*$")
-        bm_splits = backmatter_pattern.split(last_chap["content"])
-        
-        if len(bm_splits) > 1:
-            # We found back-matter at the end! 
-            # Re-assign the first part back to the last chapter
-            first_part_content, first_part_images = parse_markdown_images_from_text(bm_splits[0].strip())
-            last_chap["content"] = first_part_content
-            last_chap["images"] = first_part_images
-            
-            # Create new sections for the back-matter fragments
-            bm_counter = 900
-            for j in range(1, len(bm_splits), 2):
-                bm_name = bm_splits[j].strip().capitalize()
-                bm_content = bm_splits[j+1].strip()
-                bm_content_clean, bm_images = parse_markdown_images_from_text(bm_content)
-                
-                chapters_map[bm_counter] = {
-                    "name": bm_name,
-                    "content": bm_content_clean,
-                    "logical_num": bm_counter,
-                    "images": bm_images
-                }
-                order.append(bm_counter)
-                bm_counter += 1
-
-    for num in order:
-        chap = chapters_map[num]
-        if chap["content"].strip() or chap["images"] or chap["logical_num"] == 0:
-            final_chapters.append(chap)
     
-    return final_chapters
+    if not use_fallback:
+        chapters_map = {}
+        order = []
+        if splits[0].strip():
+            intro_content, intro_images = parse_markdown_images_from_text(splits[0].strip())
+            chapters_map[0] = {
+                "name": "Introduction",
+                "content": intro_content,
+                "logical_num": 0,
+                "images": intro_images
+            }
+            order.append(0)
+
+        for i in range(1, len(splits), 4):
+            chap_type = splits[i]
+            chap_num_str = splits[i + 1]
+            marker_num = splits[i + 2]
+            chap_content = splits[i + 3].strip()
+
+            if marker_num:
+                logical_num = int(marker_num)
+                name = f"Chapter {logical_num}"
+            else:
+                logical_num = get_logical_chapter_number(chap_num_str)
+                name_prefix = chap_type.capitalize() if chap_type else "Chapter"
+                name = f"{name_prefix} {chap_num_str.capitalize()}"
+
+            chap_content_clean, chap_images = parse_markdown_images_from_text(chap_content)
+
+            if logical_num in chapters_map:
+                chapters_map[logical_num]["images"].extend(chap_images)
+                if chap_content_clean:
+                    if chapters_map[logical_num]["content"]:
+                        chapters_map[logical_num]["content"] += "\n\n" + chap_content_clean
+                    else:
+                        chapters_map[logical_num]["content"] = chap_content_clean
+            else:
+                chapters_map[logical_num] = {
+                    "name": name,
+                    "content": chap_content_clean,
+                    "logical_num": logical_num,
+                    "images": chap_images,
+                }
+                order.append(logical_num)
+
+        if order or 0 in chapters_map:
+            last_logical_num = order[-1] if order else 0
+            last_chap = chapters_map[last_logical_num]
+            backmatter_keywords = [
+                "notes", "index", "bibliography", "acknowledgments", "epilogue",
+                "conclusion", "afterword", "about the author", "author bio",
+                "illustration credits", "credits"
+            ]
+            backmatter_pattern = re.compile(rf"(?im)^\s*({'|'.join(backmatter_keywords)})\s*$")
+            bm_splits = backmatter_pattern.split(last_chap["content"])
+            
+            if len(bm_splits) > 1:
+                first_part_content, first_part_images = parse_markdown_images_from_text(bm_splits[0].strip())
+                last_chap["content"] = first_part_content
+                last_chap["images"] = first_part_images
+                
+                bm_counter = 900
+                for j in range(1, len(bm_splits), 2):
+                    bm_name = bm_splits[j].strip().capitalize()
+                    bm_content = bm_splits[j+1].strip()
+                    bm_content_clean, bm_images = parse_markdown_images_from_text(bm_content)
+                    
+                    chapters_map[bm_counter] = {
+                        "name": bm_name,
+                        "content": bm_content_clean,
+                        "logical_num": bm_counter,
+                        "images": bm_images
+                    }
+                    order.append(bm_counter)
+                    bm_counter += 1
+
+        for num in order:
+            chap = chapters_map[num]
+            if chap["content"].strip() or chap["images"] or chap["logical_num"] == 0:
+                final_chapters.append(chap)
+                
+        if len(final_chapters) <= 1:
+            use_fallback = True
+
+    if use_fallback:
+        final_chapters = []
+        lines = [line.strip() for line in full_text.split('\n') if line.strip()]
+        toc_info = extract_toc_titles(lines)
+        if toc_info:
+            toc_end_idx = toc_info[-1][0]
+            titles = [item[1] for item in toc_info if len(item[1]) > 3]
+            
+            title_locations = []
+            current_search_idx = toc_end_idx + 1
+            for title in titles:
+                found_idx = None
+                for idx in range(current_search_idx, len(lines)):
+                    if fuzzy_match(title, lines[idx]):
+                        found_idx = idx
+                        break
+                if found_idx is not None:
+                    title_locations.append((found_idx, title))
+                    current_search_idx = found_idx + 1
+                    
+            if title_locations:
+                intro_content = "\n".join(lines[toc_end_idx + 1:title_locations[0][0]])
+                intro_content_clean, intro_images = parse_markdown_images_from_text(intro_content)
+                if intro_content_clean.strip() or intro_images:
+                    final_chapters.append({
+                        "name": "Introduction",
+                        "content": intro_content_clean,
+                        "logical_num": 0,
+                        "images": intro_images
+                    })
+                for i in range(len(title_locations)):
+                    start_line = title_locations[i][0]
+                    end_line = title_locations[i+1][0] if i + 1 < len(title_locations) else len(lines)
+                    chap_name = f"Chapter {i + 1}: {title_locations[i][1]}"
+                    chap_content = "\n".join(lines[start_line:end_line])
+                    chap_content_clean, chap_images = parse_markdown_images_from_text(chap_content)
+                    final_chapters.append({
+                        "name": chap_name,
+                        "content": chap_content_clean,
+                        "logical_num": i + 1,
+                        "images": chap_images
+                    })
+        
+        if not final_chapters:
+            full_clean, full_images = parse_markdown_images_from_text(full_text)
+            final_chapters.append({
+                "name": "Full Book Content",
+                "content": full_clean,
+                "logical_num": 1,
+                "images": full_images
+            })
+            
+    chunked_chapters = []
+    for chap in final_chapters:
+        content = chap["content"]
+        if len(content) > 25000:
+            sub_chunks = chunk_text(content, max_chars=25000)
+            if len(sub_chunks) > 1:
+                for idx, chunk in enumerate(sub_chunks):
+                    sub_name = f"{chap['name']} - Part {idx + 1}"
+                    sub_images = chap.get("images", []) if idx == len(sub_chunks) - 1 else []
+                    chunked_chapters.append({
+                        "name": sub_name,
+                        "content": chunk,
+                        "logical_num": chap["logical_num"],
+                        "images": sub_images
+                    })
+                continue
+        chunked_chapters.append(chap)
+        
+    return chunked_chapters
 
 def merge_and_split_chapters(book, exclude_keywords, image_map=None, output_dir=None):
     """
@@ -470,49 +594,58 @@ def save_summary_to_file(summary, item_name, output_dir, item_content=None):
 def get_chapter_summary_system_prompt() -> str:
     """Returns the shared system prompt for chapter summarization."""
     return f"""## Role & Goal
-    You are an Expert Book Summarizer and Cognitive Distiller. Your goal is to analyze the raw text of a single book chapter and produce a highly engaging, beautifully structured, and comprehensive chapter summary in Markdown.
-    Your summary must avoid dry academic structures and instead read like a premium, narrative-driven breakdown. It must be dense with key ideas, arguments, and actionable takeaways, while using everyday metaphors, visual ASCII diagrams, and structured inline labels.
+You are an Expert Book Summarizer and Cognitive Distiller. Your goal is to analyze the raw text of a single book chapter and produce a highly engaging, beautifully structured, and comprehensive chapter summary in Markdown.
 
-    ---
+Your summary must avoid dry academic structures and instead read like a premium, narrative-driven breakdown. It must be dense with key ideas, arguments, and actionable takeaways, focusing heavily on the "WHY" and "HOW" (the underlying causal mechanics), using everyday metaphors, true systemic ASCII diagrams, and structured inline labels.
 
-    ## Key Guidelines for High-Quality Summaries
+---
 
-    1. **Direct, Punchy Hook (No Metadata Headers):**
-       - Start your response immediately with a highly engaging introductory hook (2-3 sentences max).
-       - Do NOT include any titles or metadata headers at the very top (e.g., do NOT start with `# Chapter Name`, `## Introduction`, or `## Central Idea`). Start directly with the hook text.
-       - Format the hook using this template structure:
-         "This chapter gets to the absolute core of [Author Name]’s [Book Name] [infer author/book name from the text, or describe the main subject/work if not explicitly named]. It shifts the perspective of [core subject] from a simple [common superficial misconception] to a [profound, unexpected, or biological/structural truth]."
-       - Under the hook, include the transition line:
-         "Here is a breakdown of how this system works, using the book's core concepts."
+## Cognitive Processing (Chain of Thought)
+Before generating the final summary, perform an internal analysis within a <thought> block:
+1. Logical Decomposition: Identify the chapter's central conclusion. Map the explicit premises and evidence chains the author uses to reach that conclusion.
+2. Completeness Audit: Scan the text for every key claim, counter-argument, and data point.
+3. Causal Mapping: Identify the underlying mechanics. Determine the exact sequence of events, incentives, or dependencies (e.g., "Because X happened, Y was incentivized to do Z"). **You must explicitly use this causal map to write the paragraphs in your final output.**
+4. Constraint Verification: Ensure the summary adheres to the "no meta-talk" rule, uses zero standard bullet points for concept explanations, and ensures the ASCII diagram is a true systemic loop, not just a list in a box.
 
-    2. **Engaging Numbered Headings:**
-       - Divide the chapter into logical themes/concepts using numbered Markdown headings (e.g., `## 1. [Engaging Title]`, `## 2. [Engaging Title]`).
-       - Use descriptive and creative titles (e.g., `## 1. The Teeter-Totter of the Brain (The Pleasure-Pain Balance)`) rather than dry labels.
+---
 
-    3. **Visual Text-Based/ASCII Diagrams:**
-       - Whenever the chapter describes a system, process, cycle, feedback loop, scale, timeline, or relationship, you MUST include a clean, simple text-based ASCII diagram or visualization (enclosed in a code block) to make the mechanics immediately clear.
-       - Make these diagrams custom and specific to the concepts in the text (e.g., illustrating a scale balancing, a pathway, or a dip below baseline). Think of this as the mindmap that helps the readers understand the relation between the various concepts.
+## Key Guidelines for High-Quality Summaries
 
-    4. **Narrative Flow with Bold Inline Labels:**
-       - Do not write dry bulleted lists of isolated facts. Instead, use a mix of clear paragraphs and lists where key explanations start with **bold inline labels** (e.g., `**Concept (Context):**` or `**Concept:**`) to make the text highly scannable and modular.
-       - Use concrete, everyday metaphors and analogies to explain complex terms.
+1. **Direct, Punchy Hook (No Metadata Headers):**
+   - Start your response immediately with a highly engaging introductory hook (2-3 sentences max).
+   - Do NOT include any titles or metadata headers at the very top (e.g., do NOT start with `# Chapter Name`). Start directly with the hook text.
+   - Format the hook using this template structure:
+     "This chapter gets to the absolute core of [idea]. It shifts the perspective of [core subject] from a simple [common superficial misconception] to a [profound, unexpected, or biological/structural truth]."
 
-    5. **Strict Fidelity (No Meta-Talk):**
-       - Ground everything strictly in the text.
-       - Avoid conversational filler or meta-talk (do not write "the author argues," "in this chapter," or "the text describes"). Write directly about the concepts.
+2. **Engaging Numbered Headings:**
+   - Divide the chapter into logical themes/concepts using numbered Markdown headings (e.g., `## 1. [Theme/Concept Name]` or `## 1. [A punchy title that grabs attention and summarizes the essence of the section].`
 
-    ---
+3. **Visual Systems Diagrams (Mechanics, Not Lists):**
+   - Whenever the chapter describes a process, cycle, or relationship, you MUST include a clean, simple text-based ASCII diagram (in a code block). 
+   - **CRITICAL:** Do NOT just put lists of words inside boxes. You must show the *engine* of the concept using arrows to demonstrate feedback loops, bottlenecks, or cause-and-effect (e.g., `[Action] --> causes --> [Consequence] --> leads to --> [Result]`).
 
-    ## Expected Structure:
-    [Hook Paragraph - 2-3 sentences framing the paradigm shift]
-    Here is a breakdown of how this system works, using the book's core concepts.
+4. **Narrative Flow & The "Why":**
+   - Write in flowing, punchy paragraphs. Every time you introduce a concept using a **bold inline label**, you must immediately explain the *underlying mechanism*.
+   - Use causal phrasing like "Because [X] happens, [Y] is forced to adapt..." or "This works by [mechanism]..." Do not just state *what* happened; explain *why* the system required it to happen and *how* it impacted the larger structure.
 
-    ## 1. [Engaging Title]
-    [Concept description using bold inline labels and everyday metaphors]
-    [ASCII Diagram if applicable]
+5. **Strict Fidelity (No Meta-Talk):**
+   - Ground everything strictly in the text.
+   - Avoid conversational filler or meta-talk (do not write "the author argues," "in this chapter," or "the text describes"). Write directly about the concepts as objective reality.
 
-    ## 2. [Engaging Title]
-    ...
+---
+
+## Expected Structure:
+
+[Hook Paragraph - 2-3 sentences following the exact template]
+
+Here is a breakdown of how this system works, using the book's core concepts.
+
+## 1. [Engaging Title]
+**[Bold Concept Label]:** [Flowing paragraph explaining the WHAT, HOW, and WHY. Explain the mechanics and incentives driving this concept using causal language. No bulleted lists here.]
+**[Bold Concept Label]:** [Flowing paragraph continuing the narrative...]
+
+```text
+[ASCII Diagram demonstrating a cause-and-effect system, using arrows and loops]
     """
 
 
@@ -563,6 +696,38 @@ def create_gemini_full_summary_prompt(text: str) -> str:
 def get_local_llm_system_prompt() -> str:
     """Returns the system prompt for local LLMs."""
     return get_chapter_summary_system_prompt()
+
+
+def get_full_summary_system_prompt() -> str:
+    """Returns the system prompt for full book summarization/synthesis using local LLMs."""
+    return """## Role & Goal
+    You are a Master Information Architect. Your goal is to transform long-form chapter summaries into a Single-Page Schematic Framework. Prioritize high-density information, tabular comparisons, and "Practical Cues" over narrative analysis. Eliminate all conversational filler and introductory meta-talk.
+
+    ### 1. Executive Summary
+    Begin with a single, concise paragraph that captures the book's central purpose, main argument, and overall conclusion. This should serve as a high-level introduction that answers "What is this book about and why is it important?"
+
+    ### 2. Key Themes / Sections
+    Following the summary, identify the primary themes, arguments, or sections of the book. For each one, create a dedicated section with the following precise structure:
+
+    #### [Descriptive Title]
+    Create a clear and descriptive title for the theme or section. This should reflect the core content (e.g., "The Rise of the Roman Republic," "Principles of Effective Marketing," "The Discovery of Penicillin").
+
+    **[Core Idea]**
+    Immediately after the title, provide a single, bolded sentence that explains the main point or finding of this section.
+
+    * **Key Points & Details:**
+        * Under this sub-heading, create a bulleted list.
+        * Extract the most important supporting information for this theme. Depending on the book's genre, this could include:
+            * Key facts, statistics, or dates.
+            * Core arguments or evidence presented.
+            * Important examples, case studies, or anecdotes.
+            * Actionable steps or methodologies described.
+            * Key people, events, or discoveries mentioned.
+        * Use sub-bullets to elaborate on a point where necessary.
+
+    Create a separate section for each major theme or part of the book you identify in the source text.
+    """
+
 
 
 def summarize_text_with_gemini(prompt, api_key):
@@ -627,11 +792,11 @@ def summarize_text_with_local_llm(system_prompt, prompt):
         "prompt": prompt,
         "stream": False,
     }
-    # Configure timeout (default to 300s, check OLLAMA_TIMEOUT env var)
+    # Configure timeout (default to 600s, check OLLAMA_TIMEOUT env var)
     try:
-        timeout_val = int(os.getenv("OLLAMA_TIMEOUT", "300"))
+        timeout_val = int(os.getenv("OLLAMA_TIMEOUT", "600"))
     except ValueError:
-        timeout_val = 300
+        timeout_val = 600
 
     try:
         response = requests.post(url, headers=headers, json=data, timeout=timeout_val)
@@ -690,8 +855,13 @@ def summarize_text(
     """
     if use_local_llm:
         print("Using local LLM for summarization...")
-        system_prompt = get_local_llm_system_prompt()
-        return summarize_text_with_local_llm(system_prompt, text_content)
+        if is_full_summary:
+            system_prompt = get_full_summary_system_prompt()
+            prompt = f"Here are the chapter summaries you are to synthesize:\n{text_content}"
+        else:
+            system_prompt = get_local_llm_system_prompt()
+            prompt = text_content
+        return summarize_text_with_local_llm(system_prompt, prompt)
 
     if openai_api_key:
         print("Using OpenAI API for summarization...")

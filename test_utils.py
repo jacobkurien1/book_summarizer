@@ -324,6 +324,26 @@ class TestSummarizer(unittest.TestCase):
         mock_gemini.assert_not_called()
         self.assertEqual(summary, "Local summary")
 
+    @patch("utils.get_full_summary_system_prompt")
+    @patch("utils.summarize_text_with_local_llm")
+    @patch("utils.summarize_text_with_gemini")
+    def test_summarize_text_calls_local_llm_full_summary(
+        self, mock_gemini, mock_local, mock_get_system
+    ):
+        """Checks if local LLM is called with full summary prompt when requested."""
+        prompt = "Test prompt"
+        mock_get_system.return_value = "System prompt full"
+        mock_local.return_value = "Local summary full"
+
+        summary = utils.summarize_text(
+            prompt, use_local_llm=True, gemini_api_key="fake_key", is_full_summary=True
+        )
+
+        expected_prompt = f"Here are the chapter summaries you are to synthesize:\n{prompt}"
+        mock_local.assert_called_once_with("System prompt full", expected_prompt)
+        mock_gemini.assert_not_called()
+        self.assertEqual(summary, "Local summary full")
+
     @patch("utils.summarize_text_with_local_llm")
     @patch("utils.summarize_text_with_gemini")
     @patch("utils.create_gemini_chapter_summary_prompt")
@@ -868,3 +888,65 @@ class TestCalibreSplitFilesHandling(unittest.TestCase):
             f"Endnote file should not be classified as '{result}'"
         )
 
+
+class TestMonolithicTOCSplittingAndChunking(unittest.TestCase):
+    """Unit tests for monolithic EPUB handling, TOC extraction, fuzzy matching, and chunking."""
+
+    def test_ocr_normalize(self):
+        self.assertEqual(utils.ocr_normalize("The Clay Tablets"), "theclaltablets")
+        self.assertEqual(utils.ocr_normalize("The CI ay Tablets"), "theclaltablets")
+
+    def test_fuzzy_match(self):
+        self.assertTrue(utils.fuzzy_match("The Clay Tablets From Babylon", "The CI ay Tablets From BabylonSt. Swithin'sCollege"))
+        self.assertTrue(utils.fuzzy_match("About the author", "About the author"))
+        self.assertFalse(utils.fuzzy_match("Foreword", "This is some random text in the book body"))
+
+    def test_extract_toc_titles(self):
+        lines = [
+            "TABLE OF CONTENTS",
+            "About the author 3",
+            "Foreword 5",
+            "An Historical Sketch of Babylon 6",
+            "The Man Who Desired Gold 9",
+            "This is just normal body text.",
+        ]
+        toc = utils.extract_toc_titles(lines, max_search=10)
+        titles = [t[1] for t in toc]
+        self.assertEqual(titles, ["About the author", "Foreword", "An Historical Sketch of Babylon", "The Man Who Desired Gold"])
+
+    def test_chunk_text(self):
+        text = "Paragraph 1\nParagraph 2\nParagraph 3"
+        chunks = utils.chunk_text(text, max_chars=15)
+        self.assertEqual(chunks, ["Paragraph 1", "Paragraph 2", "Paragraph 3"])
+
+        chunks_larger = utils.chunk_text(text, max_chars=25)
+        self.assertEqual(chunks_larger, ["Paragraph 1\nParagraph 2", "Paragraph 3"])
+
+    def test_split_text_into_chapters_with_toc_and_chunking(self):
+        full_text = (
+            "TABLE OF CONTENTS\n"
+            "First Story 10\n"
+            "Second Story 20\n"
+            "Third Story 30\n"
+            "Fourth Story 40\n"
+            "Introduction\n"
+            "This is the introduction text.\n"
+            "First Story\n"
+            "This is content for the first story. It is long.\n"
+            "Second Story\n"
+            "This is content for the second story. It is also long.\n"
+            "Third Story\n"
+            "Content 3\n"
+            "Fourth Story\n"
+            "Content 4"
+        )
+        chapters = utils._split_text_into_chapters(full_text)
+        names = [c["name"] for c in chapters]
+        self.assertIn("Chapter 1: First Story", names)
+        self.assertIn("Chapter 2: Second Story", names)
+
+    def test_sanitize_filename_preserves_dotted_roman_numerals(self):
+        from file_utils import sanitize_filename
+        self.assertEqual(sanitize_filename("Tablet No. I"), "Tablet_No_I")
+        self.assertEqual(sanitize_filename("chapter_1.xhtml"), "chapter_1")
+        self.assertEqual(sanitize_filename("Section 1.2"), "Section_1_2")

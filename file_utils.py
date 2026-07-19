@@ -13,11 +13,15 @@ def sanitize_filename(name):
     Sanitizes a string to be safe for file system use by removing
     illegal characters and substituting spaces for underscores.
     """
-    # Separate base and extension first from the original name
-    base, _ext = os.path.splitext(name)
+    # Only separate base and extension if it's a known extension
+    base, ext = os.path.splitext(name)
+    if ext.lower() in (".md", ".html", ".xhtml", ".epub", ".pdf", ".txt", ".jpg", ".jpeg", ".png"):
+        name_to_clean = base
+    else:
+        name_to_clean = name
 
     # Sanitize the base name
-    clean_name = base.replace(" ", "_")
+    clean_name = name_to_clean.replace(" ", "_")
     clean_name = re.sub(
         r"[^a-zA-Z0-9_-]", "_", clean_name
     )  # Replace non-alphanumeric (except _ and -) with single underscores

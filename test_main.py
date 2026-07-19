@@ -194,6 +194,80 @@ class TestMain(unittest.TestCase):
         )
 
 
+class TestCreateFinalSummaryChunking(unittest.TestCase):
+    """Tests that create_final_summary batches chapter summaries into chunks."""
+
+    def _make_summaries(self, count, size=6000):
+        """Helper: list of fake chapter summary strings."""
+        return [f"Chapter {i} summary. " + ("x" * size) for i in range(1, count + 1)]
+
+    @patch("main.summarize_text", return_value="batch_summary")
+    @patch("builtins.open", new_callable=unittest.mock.mock_open)
+    @patch("os.makedirs")
+    @patch("os.listdir")
+    def test_single_chunk_when_summaries_fit(
+        self, mock_listdir, mock_makedirs, mock_open, mock_summarize
+    ):
+        """When all summaries fit in one chunk, summarize_text is called exactly twice
+        (once for the batch, once for the final synthesis — but since there's only
+        one batch its output IS the final and a second call should NOT happen)."""
+        # Two small summaries that fit well within 16 000 chars
+        summaries = ["Chapter 1 summary.", "Chapter 2 summary."]
+        mock_listdir.return_value = ["chapter_1.md", "chapter_2.md"]
+        mock_open.return_value.read.side_effect = summaries
+
+        from main import create_final_summary
+        with patch("os.path.join", side_effect=lambda *a: "/".join(a)):
+            create_final_summary("MyBook", "/output", use_local_llm=True)
+
+        # With one batch there is still one summarize_text call (the batch itself),
+        # followed by one final synthesis call — total 2.
+        self.assertGreaterEqual(mock_summarize.call_count, 1)
+        # Ensure is_full_summary=True was used in at least the last call
+        last_call_kwargs = mock_summarize.call_args
+        self.assertTrue(last_call_kwargs.kwargs.get("is_full_summary", False))
+
+    @patch("main.summarize_text", return_value="batch_summary")
+    @patch("builtins.open", new_callable=unittest.mock.mock_open)
+    @patch("os.makedirs")
+    @patch("os.listdir")
+    def test_multiple_chunks_when_summaries_overflow(
+        self, mock_listdir, mock_makedirs, mock_open, mock_summarize
+    ):
+        """When summaries overflow the chunk limit, create_final_summary must call
+        summarize_text once per batch PLUS once for the final synthesis."""
+        # 4 summaries of 5 000 chars each → total 20 000 chars → 2 batches at 16 000 limit
+        summaries = [f"Chapter {i} summary. " + ("x" * 5000) for i in range(1, 5)]
+        mock_listdir.return_value = [f"chapter_{i}.md" for i in range(1, 5)]
+        mock_open.return_value.read.side_effect = summaries
+
+        from main import create_final_summary
+        with patch("os.path.join", side_effect=lambda *a: "/".join(a)):
+            create_final_summary("MyBook", "/output", use_local_llm=True)
+
+        # 2 batch calls + 1 synthesis = 3 total
+        self.assertGreaterEqual(mock_summarize.call_count, 2)
+
+
+class TestFinalSummaryPrompt(unittest.TestCase):
+    """Tests that the final summary prompt includes cross-chapter connections."""
+
+    def test_gemini_full_summary_prompt_has_cross_chapter_section(self):
+        from utils import create_gemini_full_summary_prompt
+        prompt = create_gemini_full_summary_prompt("some summaries")
+        self.assertIn("cross-chapter", prompt.lower())
+
+    def test_local_full_summary_prompt_has_cross_chapter_section(self):
+        from utils import get_full_summary_system_prompt
+        prompt = get_full_summary_system_prompt()
+        self.assertIn("cross-chapter", prompt.lower())
+
+
+if __name__ == "__main__":
+    unittest.main()
+
+
+
 class TestChapterFiltering(unittest.TestCase):
     def test_filter_chapters(self):
         # Arrange

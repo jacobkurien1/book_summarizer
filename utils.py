@@ -687,6 +687,10 @@ def create_gemini_full_summary_prompt(text: str) -> str:
         * Use sub-bullets to elaborate on a point where necessary.
 
     Create a separate section for each major theme or part of the book you identify in the source text.
+
+    ### 3. Cross-Chapter Connections & Thematic Synthesis
+    Identify and analyze the core connections, dependencies, and logical transitions between the major themes of the book. Explain how concepts introduced in early sections build the foundation for later concepts. Highlight any recurring threads, contradictions, or overarching principles that bind the chapters together. Use a short dependency chain or arrow diagram (ASCII) where helpful.
+
     ## Input Summaries
     Here are the chapter summaries you are to synthesize:
     {text}
@@ -726,6 +730,9 @@ def get_full_summary_system_prompt() -> str:
         * Use sub-bullets to elaborate on a point where necessary.
 
     Create a separate section for each major theme or part of the book you identify in the source text.
+
+    ### 3. Cross-Chapter Connections & Thematic Synthesis
+    Identify and analyze the core connections, dependencies, and logical transitions between the major themes of the book. Explain how concepts introduced in early sections build the foundation for later concepts. Highlight any recurring threads, contradictions, or overarching principles that bind the chapters together. Use a short dependency chain or arrow diagram (ASCII) where helpful.
     """
 
 

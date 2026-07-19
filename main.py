@@ -207,10 +207,14 @@ def create_final_summary(
     openai_api_key=None,
 ):
     """
-    Concatenates all individual chapter summaries and asks the LLM
-    to generate a final full-book summary.
+    Concatenates all individual chapter summaries and asks the LLM to generate
+    a final full-book summary. Batches summaries into chunks that fit within the
+    local LLM context window (~16 000 chars ≈ 4 000 tokens), summarizes each
+    batch, then synthesizes the batch results into one final summary.
     """
     print("\nGenerating final summary...")
+
+    MAX_CHUNK_CHARS = 16000
 
     chapter_summaries = []
     for filename in sorted(os.listdir(output_base_dir)):
@@ -226,15 +230,52 @@ def create_final_summary(
         print("No chapter summaries found to generate a final summary.")
         return
 
-    full_text = "\n\n".join(chapter_summaries)
+    # --- Batch summaries into context-window-safe chunks ---
+    batches, current_batch, current_len = [], [], 0
+    for summary in chapter_summaries:
+        entry_len = len(summary) + 2  # account for "\n\n" separator
+        if current_batch and current_len + entry_len > MAX_CHUNK_CHARS:
+            batches.append(current_batch)
+            current_batch, current_len = [summary], entry_len
+        else:
+            current_batch.append(summary)
+            current_len += entry_len
+    if current_batch:
+        batches.append(current_batch)
 
-    final_summary = summarize_text(
-        text_content=full_text,
-        use_local_llm=use_local_llm,
-        gemini_api_key=gemini_api_key,
-        openai_api_key=openai_api_key,
-        is_full_summary=True,
-    )
+    # --- Summarize each batch ---
+    batch_results = []
+    for i, batch in enumerate(batches):
+        batch_text = "\n\n".join(batch)
+        print(f"Summarizing batch {i + 1}/{len(batches)}...")
+        result = summarize_text(
+            text_content=batch_text,
+            use_local_llm=use_local_llm,
+            gemini_api_key=gemini_api_key,
+            openai_api_key=openai_api_key,
+            is_full_summary=True,
+        )
+        if result:
+            batch_results.append(result)
+
+    if not batch_results:
+        print("Failed to generate final summary.")
+        return
+
+    # --- Single batch: its result is the final summary ---
+    # --- Multiple batches: synthesize batch results into one ---
+    if len(batch_results) == 1:
+        final_summary = batch_results[0]
+    else:
+        print("Synthesizing batch summaries into final summary...")
+        combined = "\n\n".join(batch_results)
+        final_summary = summarize_text(
+            text_content=combined,
+            use_local_llm=use_local_llm,
+            gemini_api_key=gemini_api_key,
+            openai_api_key=openai_api_key,
+            is_full_summary=True,
+        )
 
     if final_summary:
         final_summary_filename = f"summary_{book_folder_name}_Full.md"
@@ -250,7 +291,7 @@ if __name__ == "__main__":
     if len(sys.argv) < 2:
         print(
             "Usage: python main.py <path_to_epub_file> [--full-summary-only] "
-            "[--localllm] [--openai] [--chapters 1,3,5] [--hybrid]"
+            "[--localllm] [--local] [--openai] [--chapters 1,3,5] [--hybrid]"
         )
         sys.exit(1)
 
@@ -260,7 +301,7 @@ if __name__ == "__main__":
 
     # Use constants or rename to avoid shadowing
     CLI_FULL_SUMMARY_ONLY = "--full-summary-only" in sys.argv
-    CLI_USE_LOCAL_LLM = "--localllm" in sys.argv
+    CLI_USE_LOCAL_LLM = "--localllm" in sys.argv or "--local" in sys.argv
     CLI_USE_OPENAI = "--openai" in sys.argv
     CLI_USE_HYBRID = "--hybrid" in sys.argv
 

@@ -327,7 +327,7 @@ def extract_toc_titles(lines, max_search=200):
         return consecutive_matches
     return []
 
-def chunk_text(text, max_chars=25000):
+def chunk_text(text, max_chars=50000):
     """Split text into smaller chunks at paragraph boundaries (newline)."""
     paragraphs = text.split('\n')
     chunks = []
@@ -500,8 +500,8 @@ def _split_text_into_chapters(full_text):
     chunked_chapters = []
     for chap in final_chapters:
         content = chap["content"]
-        if len(content) > 25000:
-            sub_chunks = chunk_text(content, max_chars=25000)
+        if len(content) > 50000:
+            sub_chunks = chunk_text(content, max_chars=50000)
             if len(sub_chunks) > 1:
                 for idx, chunk in enumerate(sub_chunks):
                     sub_name = f"{chap['name']} - Part {idx + 1}"

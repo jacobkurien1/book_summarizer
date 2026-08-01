@@ -25,6 +25,7 @@ def sanitize_filename(name):
     clean_name = re.sub(
         r"[^a-zA-Z0-9_-]", "_", clean_name
     )  # Replace non-alphanumeric (except _ and -) with single underscores
+    clean_name = re.sub(r"[_-]*_[_-]*", "_", clean_name)  # Clean up mixed adjacent _ and - sequences containing an _
     clean_name = re.sub(r"_+", "_", clean_name)  # Replace multiple underscores with single
     clean_name = clean_name.strip("_")  # Remove leading/trailing underscores
 

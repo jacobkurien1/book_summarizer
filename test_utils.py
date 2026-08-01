@@ -950,3 +950,5 @@ class TestMonolithicTOCSplittingAndChunking(unittest.TestCase):
         self.assertEqual(sanitize_filename("Tablet No. I"), "Tablet_No_I")
         self.assertEqual(sanitize_filename("chapter_1.xhtml"), "chapter_1")
         self.assertEqual(sanitize_filename("Section 1.2"), "Section_1_2")
+        self.assertEqual(sanitize_filename("Chapter 3 - Part 1"), "Chapter_3_Part_1")
+        self.assertEqual(utils.get_chapter_identifier("Chapter 3 - Part 1"), "chapter_3_part_1")

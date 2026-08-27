@@ -25,7 +25,16 @@ def get_chapter_identifier(chapter_name_raw, item_content=None):
     Given a raw EPUB manifest name or HTML content, derives a clean,
     standardized logical chapter name (e.g. 'chapter_1').
     """
-    simplified_name = chapter_name_raw.lower()
+    simplified_name = chapter_name_raw.lower().strip()
+
+    # Handle sub-chunk suffix like " - Part 2" or "_part_2" at the end of chapter_name_raw
+    part_match = re.search(r"(?:^|[\s_\-])part[_\s-]*(\d+)$", simplified_name)
+    if part_match:
+        main_name = simplified_name[:part_match.start()].strip(" -_")
+        if main_name:
+            base_id = get_chapter_identifier(main_name, item_content)
+            return f"{base_id}_part_{int(part_match.group(1))}"
+
     # Aggressively clean the name for better identifier matching
     simplified_name = simplified_name.replace("text/", "")
     simplified_name = simplified_name.replace("xhtml/", "")
@@ -49,9 +58,6 @@ def get_chapter_identifier(chapter_name_raw, item_content=None):
     match = re.search(r"(?:chapter|c|part)[_\s-]*(\d+)", simplified_name)
     if match:
         base_id = f"chapter_{int(match.group(1))}"
-        part_match = re.search(r"part[_\s-]*(\d+)", chapter_name_raw.lower())
-        if part_match:
-            return f"{base_id}_part_{int(part_match.group(1))}"
         return base_id
 
     # Handle Appendix

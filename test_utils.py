@@ -952,3 +952,10 @@ class TestMonolithicTOCSplittingAndChunking(unittest.TestCase):
         self.assertEqual(sanitize_filename("Section 1.2"), "Section_1_2")
         self.assertEqual(sanitize_filename("Chapter 3 - Part 1"), "Chapter_3_Part_1")
         self.assertEqual(utils.get_chapter_identifier("Chapter 3 - Part 1"), "chapter_3_part_1")
+
+    def test_introduction_with_part_sub_chunks(self):
+        self.assertEqual(utils.get_chapter_identifier("Introduction - Part 1"), "introduction_part_1")
+        self.assertEqual(utils.get_chapter_identifier("Introduction - Part 2"), "introduction_part_2")
+        self.assertEqual(utils.get_chapter_identifier("Foreword - Part 1"), "foreword_part_1")
+        self.assertEqual(utils.get_chapter_identifier("Chapter 1: The Beginning - Part 1"), "chapter_1_part_1")
+        self.assertEqual(utils.get_chapter_identifier("Chapter 1: The Beginning - Part 2"), "chapter_1_part_2")

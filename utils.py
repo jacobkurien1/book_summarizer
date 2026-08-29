@@ -209,17 +209,20 @@ def get_logical_chapter_number(text):
     else:
         search_items = [text]
 
-    # Pattern A: line/heading starts with an optional chapter indicator then
-    # a digit or spelled-out number (≤ 100 for digits).
-    pat_start = re.compile(
-        rf"^\s*(?:chapter|part|c)?\s*"
-        rf"(\d+|{_word_alts})\b",
+    # Pattern A: line/heading starts with an optional chapter indicator then a digit (≤ 100).
+    pat_digits_start = re.compile(
+        r"^\s*(?:chapter|part|c)?\s*(\d+)\b",
         re.IGNORECASE,
     )
-    # Pattern B: explicit chapter/part indicator ANYWHERE in the line.
+    # Pattern B: explicit chapter/part indicator with digit or spelled-out word.
     pat_explicit = re.compile(
         rf"\b(?:chapter|part|c)[_\- ]?\s*"
         rf"(\d+|{_word_alts})\b",
+        re.IGNORECASE,
+    )
+    # Pattern C: standalone spelled-out word heading.
+    pat_word_standalone = re.compile(
+        rf"^\s*({_word_alts})\s*$",
         re.IGNORECASE,
     )
 
@@ -237,16 +240,25 @@ def get_logical_chapter_number(text):
             ):
                 continue
 
-        for pat in (pat_start, pat_explicit):
-            m = pat.match(item) if pat is pat_start else pat.search(item)
-            if m:
-                val = m.group(1).lower()
-                if val.isdigit():
-                    n = int(val)
-                    if n <= 100:
-                        return n
-                elif val in word_to_num:
-                    return word_to_num[val]
+        m = pat_digits_start.match(item)
+        if m:
+            val = int(m.group(1))
+            if val <= 100:
+                return val
+
+        m = pat_explicit.search(item)
+        if m:
+            val = m.group(1).lower()
+            if val.isdigit():
+                n = int(val)
+                if n <= 100:
+                    return n
+            elif val in word_to_num:
+                return word_to_num[val]
+
+        m = pat_word_standalone.match(item)
+        if m:
+            return word_to_num[m.group(1).lower()]
 
     return None
 
@@ -315,6 +327,44 @@ def fuzzy_match(title, text):
 
 def extract_toc_titles(lines, max_search=200):
     """Scans the beginning lines to find a Table of Contents. Returns list of (line_idx, title)."""
+    # 1. Look for explicit Table of Contents header line
+    toc_header_idx = None
+    for idx, line in enumerate(lines[:max_search]):
+        line_clean = line.strip().lower()
+        if line_clean in ("table of contents", "contents", "toc"):
+            toc_header_idx = idx
+            break
+
+    if toc_header_idx is not None:
+        consecutive_titles = []
+        skip_keywords = ["title page", "copyright", "dedication", "cover", "table of contents", "contents", "toc"]
+        stop_keywords = [
+            "isbn", "copyright (c)", "all rights reserved", "penguin group",
+            "published by", "first published", "bestselling books",
+            "free e-books", "also by", "other books by", "portfolio"
+        ]
+        
+        for idx in range(toc_header_idx + 1, min(len(lines), toc_header_idx + 60)):
+            line = lines[idx].strip()
+            line_lower = line.lower()
+            
+            if any(k in line_lower for k in stop_keywords):
+                break
+            if len(line) > 150 or len(line.split()) > 25:
+                break
+            if re.search(r"\b[a-z]{3,}\s+[a-z]{3,}\s+[a-z]{3,}\.\s*$", line):
+                break
+            if any(sk == line_lower or line_lower.startswith(sk) for sk in skip_keywords):
+                continue
+
+            clean_title = re.sub(r"\s*(?:\.|\s)+\s*\d+$", "", line).strip()
+            if len(clean_title) > 2:
+                consecutive_titles.append((idx, clean_title))
+                
+        if len(consecutive_titles) >= 3:
+            return consecutive_titles
+
+    # 2. Fallback to page-numbered TOC search
     toc_pattern = re.compile(r"^(.*?)\s+(?:\.|\s)*\s*(\d+)$")
     consecutive_matches = []
     for idx, line in enumerate(lines[:max_search]):
@@ -462,9 +512,10 @@ def _split_text_into_chapters(full_text):
             title_locations = []
             current_search_idx = toc_end_idx + 1
             for title in titles:
+                short_title = re.split(r"\s+[-–:]\s+", title)[0].strip()
                 found_idx = None
                 for idx in range(current_search_idx, len(lines)):
-                    if fuzzy_match(title, lines[idx]):
+                    if fuzzy_match(title, lines[idx]) or (len(short_title) > 3 and fuzzy_match(short_title, lines[idx])):
                         found_idx = idx
                         break
                 if found_idx is not None:

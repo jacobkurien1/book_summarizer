@@ -959,3 +959,27 @@ class TestMonolithicTOCSplittingAndChunking(unittest.TestCase):
         self.assertEqual(utils.get_chapter_identifier("Foreword - Part 1"), "foreword_part_1")
         self.assertEqual(utils.get_chapter_identifier("Chapter 1: The Beginning - Part 1"), "chapter_1_part_1")
         self.assertEqual(utils.get_chapter_identifier("Chapter 1: The Beginning - Part 2"), "chapter_1_part_2")
+
+    def test_get_logical_chapter_number_prevents_sentence_false_positives(self):
+        text = "<p>One conductor I know travels the world giving corporate performances...</p>"
+        self.assertIsNone(utils.get_logical_chapter_number(text))
+
+        chapter_text = "<h1>Chapter One</h1><p>Some text</p>"
+        self.assertEqual(utils.get_logical_chapter_number(chapter_text), 1)
+
+    def test_extract_toc_titles_unnumbered_block(self):
+        lines = [
+            "Table of Contents",
+            "Title Page",
+            "Copyright Page",
+            "Introduction",
+            "THINKING ABOUT YOUR CHOICE",
+            "BECOMING THE LINCHPIN",
+            "THE RESISTANCE",
+            "Copyright (c) 2010"
+        ]
+        titles = [t[1] for t in utils.extract_toc_titles(lines)]
+        self.assertIn("Introduction", titles)
+        self.assertIn("THINKING ABOUT YOUR CHOICE", titles)
+        self.assertIn("BECOMING THE LINCHPIN", titles)
+        self.assertIn("THE RESISTANCE", titles)
